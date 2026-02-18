@@ -4,6 +4,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SETUPLINUX_SCRIPTS_DIR="$SCRIPT_DIR/miniscripts/setuplinux"
+VALIDATION_SCRIPT="$SCRIPT_DIR/miniscripts/notautorun/SetupValidation.sh"
 
 # This array stores script paths chosen during the question phase.
 # The run phase executes them after all prompts are answered.
@@ -23,6 +24,17 @@ ask_yes_no() {
     esac
   done
 }
+
+if [[ ! -f "$VALIDATION_SCRIPT" ]]; then
+  echo "Validation script not found: $VALIDATION_SCRIPT"
+  exit 1
+fi
+
+echo "Running setup validation..."
+if ! "$VALIDATION_SCRIPT"; then
+  echo "Setup validation failed. Exiting."
+  exit 1
+fi
 
 # ---------------------------
 # Question Phase (prompts only)
