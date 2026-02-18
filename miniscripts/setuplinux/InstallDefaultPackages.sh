@@ -14,7 +14,6 @@ packages=(
   "konsole"
   "dolphin"
   "fastfetch"
-  "anydesk"
 )
 
 echo "Installing default packages..."

@@ -1,0 +1,9 @@
+# Use [first] and [last] sections to enforce execution order.
+# You can use either a filename or a path relative to miniscripts/setuplinux.
+
+[first]
+AddRepos.sh
+
+[last]
+FavoritesAndTaskbarConfig.sh
+RemoveUnwantedPackages.sh
