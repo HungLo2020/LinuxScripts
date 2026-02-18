@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+packages=(
+  "rclone"
+  "virt-manager"
+  "variety"
+  "qdirstat"
+  "baobab"
+  "partitionmanager"
+  "python3-pip"
+  "pipx"
+  "flatpak"
+  "kate"
+  "konsole"
+  "dolphin"
+  "fastfetch"
+)
+
+echo "Installing default packages..."
+for package in "${packages[@]}"; do
+  sudo apt install -y "$package"
+  echo "Installed $package"
+done
+
+echo "Done installing default packages."

@@ -151,7 +151,7 @@ done
 
 # Installing Flatpaks
 sudo flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
-fprograms=("flathub" "bottles" "flatseal" "plexamp" "MissionCenter")
+fprograms=("flathub" "bottles" "flatseal" "MissionCenter")
 for prog in "${fprograms[@]}"; do
   sudo flatpak install -y "$prog"
   echo "Installed $prog"
