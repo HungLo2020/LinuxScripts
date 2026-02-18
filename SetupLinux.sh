@@ -51,12 +51,16 @@ fi
 
 mapfile -t DISCOVERED_SCRIPTS < <(find "$SETUPLINUX_SCRIPTS_DIR" -type f -name "*.sh" | sort)
 
-for script_path in "${DISCOVERED_SCRIPTS[@]}"; do
-  relative_script="${script_path#"$SETUPLINUX_SCRIPTS_DIR"/}"
-  if ask_yes_no "Run $relative_script?"; then
-    SELECTED_SCRIPTS+=("$script_path")
-  fi
-done
+if ask_yes_no "Run all scripts?"; then
+  SELECTED_SCRIPTS=("${DISCOVERED_SCRIPTS[@]}")
+else
+  for script_path in "${DISCOVERED_SCRIPTS[@]}"; do
+    relative_script="${script_path#"$SETUPLINUX_SCRIPTS_DIR"/}"
+    if ask_yes_no "Run $relative_script?"; then
+      SELECTED_SCRIPTS+=("$script_path")
+    fi
+  done
+fi
 
 # Run apt update once at the start to ensure we have the latest package info after script selection
 echo "Updating package lists..."

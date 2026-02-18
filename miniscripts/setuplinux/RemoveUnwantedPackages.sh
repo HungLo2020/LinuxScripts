@@ -16,15 +16,27 @@ unwanted_packages=(
   "kmail"
   "kmouth"
   "konqueror"
-  "knotes"
   "korganizer"
   "kwrite"
+  "kmahjongg"
+  "kpat"
+  "ksudoku"
+  "katawa-shoujo"
 )
 
 echo "Removing unwanted packages..."
 for package in "${unwanted_packages[@]}"; do
-  sudo apt remove -y "$package"
-  echo "Removed $package"
+  if ! apt-cache show "$package" >/dev/null 2>&1; then
+    echo "Skipping $package (package name not found)"
+    continue
+  fi
+
+  if dpkg -s "$package" >/dev/null 2>&1; then
+    sudo apt remove -y "$package"
+    echo "Removed $package"
+  else
+    echo "Skipping $package (not installed)"
+  fi
 done
 
 echo "Done removing unwanted packages."

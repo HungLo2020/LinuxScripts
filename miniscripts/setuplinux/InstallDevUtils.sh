@@ -12,6 +12,9 @@ if [[ ! -x "$CREATE_REPOS_SCRIPT" ]]; then
 fi
 "$CREATE_REPOS_SCRIPT"
 
+sudo apt install cura -y 
+
+# Check if vscode is installed
 if command -v code >/dev/null 2>&1; then
   echo "VS Code is already installed."
 else
@@ -23,6 +26,14 @@ else
   echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/packages.microsoft.gpg] https://packages.microsoft.com/repos/code stable main" | sudo tee /etc/apt/sources.list.d/vscode.list >/dev/null
   sudo apt update
   sudo apt install -y code
+fi
+
+# Check if intellij-idea is installed via snap
+if snap list intellij-idea >/dev/null 2>&1; then
+  echo "intellij-idea is already installed via snap."
+else
+  echo "Installing intellij-idea via snap..."
+  sudo snap install intellij-idea --classic
 fi
 
 echo "InstallDevUtils complete."
