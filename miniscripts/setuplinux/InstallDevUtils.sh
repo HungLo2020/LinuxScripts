@@ -12,7 +12,20 @@ if [[ ! -x "$CREATE_REPOS_SCRIPT" ]]; then
 fi
 "$CREATE_REPOS_SCRIPT"
 
-sudo apt install cura -y 
+# Install Regular APT packages for development work
+packages=(
+  "cura"
+  "virt-manager"
+  "gh"
+)
+
+echo "Installing apt dev packages..."
+for package in "${packages[@]}"; do
+  sudo apt install -y "$package"
+  echo "Installed $package"
+done
+
+echo "Done installing dev packages."
 
 # Check if vscode is installed
 if command -v code >/dev/null 2>&1; then

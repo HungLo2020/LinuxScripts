@@ -4,8 +4,6 @@ set -euo pipefail
 
 packages=(
   "rclone"
-  "virt-manager"
-  "variety"
   "qdirstat"
   "baobab"
   "partitionmanager"
@@ -16,6 +14,7 @@ packages=(
   "konsole"
   "dolphin"
   "fastfetch"
+  "anydesk"
 )
 
 echo "Installing default packages..."
