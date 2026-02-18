@@ -1,2 +1,0 @@
-1 * * * * rclone bisync /home/matt/OneDrive/Media/Wallpapers/ /home/matt/OneDrive-Local/Media/Wallpapers/ --verbose
-1 1 * * 1 rclone bisync /home/matt/OneDrive/Media/Wallpapers/ /home/matt/OneDrive-Local/Media/Wallpapers/ --resync --verbose
