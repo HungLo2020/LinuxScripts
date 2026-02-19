@@ -27,21 +27,6 @@ done
 
 echo "Done installing game packages."
 
-# Remove Discord if currently installed, then replace with Vesktop
-echo "Checking for existing Discord installations..."
-if dpkg -s discord >/dev/null 2>&1; then
-  echo "Removing Discord (deb)..."
-  sudo apt remove -y discord
-fi
-if snap list discord >/dev/null 2>&1; then
-  echo "Removing Discord (snap)..."
-  sudo snap remove discord
-fi
-if flatpak list --app --columns=application 2>/dev/null | grep -q '^com.discordapp.Discord$'; then
-  echo "Removing Discord (flatpak)..."
-  sudo flatpak uninstall -y com.discordapp.Discord
-fi
-
 # Install Vesktop (custom Discord client)
 if dpkg -s vesktop >/dev/null 2>&1; then
   echo "Vesktop is already installed."
