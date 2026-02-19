@@ -20,4 +20,7 @@ for package in "${flatpak_packages[@]}"; do
   echo "Installed $package"
 done
 
+echo "Installing Discord flatpak..."
+sudi flatpak install -y flathub com.discordapp.Discord
+
 echo "Done installing Flatpak packages."
