@@ -2,9 +2,24 @@
 
 set -euo pipefail
 
-CURRENT_USER="$(id -un)"
-CURRENT_GROUP="$(id -gn)"
-HOME_DIR="$HOME"
+TARGET_USER="${SUDO_USER:-$(id -un)}"
+TARGET_HOME="$(getent passwd "$TARGET_USER" | cut -d: -f6)"
+if [[ -z "$TARGET_HOME" ]]; then
+  echo "Error: Could not resolve home directory for user '$TARGET_USER'."
+  exit 1
+fi
+
+TARGET_GROUP="$(id -gn "$TARGET_USER")"
+
+run_as_target_user() {
+  if [[ "$(id -un)" == "$TARGET_USER" ]]; then
+    "$@"
+  else
+    sudo -u "$TARGET_USER" "$@"
+  fi
+}
+
+HOME_DIR="$TARGET_HOME"
 RCLONE_CONFIG="$HOME_DIR/.config/rclone/rclone.conf"
 ONEDRIVE_DIR="$HOME_DIR/OneDrive"
 LOCAL_WALLPAPER_DIR="$HOME_DIR/OneDrive-Local/Media/Wallpapers"
@@ -21,10 +36,10 @@ normalize_crontab() {
 echo "Installing rclone..."
 sudo apt install -y rclone
 
-echo "Starting rclone config..."
+echo "Starting rclone config for user '$TARGET_USER'..."
 while true; do
-  rclone config --config "$RCLONE_CONFIG" </dev/tty >/dev/tty 2>&1
-  if rclone listremotes --config "$RCLONE_CONFIG" 2>/dev/null | grep -qE '^OneDrive:$'; then
+  run_as_target_user rclone config --config "$RCLONE_CONFIG" </dev/tty >/dev/tty 2>&1
+  if run_as_target_user rclone listremotes --config "$RCLONE_CONFIG" 2>/dev/null | grep -qE '^OneDrive:$'; then
     echo "Found remote 'OneDrive:' in $RCLONE_CONFIG"
     break
   fi
@@ -36,6 +51,7 @@ done
 
 echo "Ensuring mountpoint exists at $ONEDRIVE_DIR..."
 mkdir -p "$ONEDRIVE_DIR"
+chown "$TARGET_USER:$TARGET_GROUP" "$ONEDRIVE_DIR"
 
 echo "Creating or updating systemd service at $SERVICE_PATH..."
 sudo tee "$SERVICE_PATH" > /dev/null <<EOF
@@ -48,8 +64,8 @@ Type=simple
 ExecStart=/usr/bin/rclone mount OneDrive: $ONEDRIVE_DIR --vfs-cache-mode writes
 ExecStop=/bin/fusermount -uz $ONEDRIVE_DIR
 Restart=on-failure
-User=$CURRENT_USER
-Group=$CURRENT_GROUP
+User=$TARGET_USER
+Group=$TARGET_GROUP
 
 [Install]
 WantedBy=default.target
@@ -62,17 +78,26 @@ sudo systemctl start rclone-mount.service
 
 echo "Ensuring local wallpaper sync directory exists..."
 mkdir -p "$LOCAL_WALLPAPER_DIR"
+chown -R "$TARGET_USER:$TARGET_GROUP" "$HOME_DIR/OneDrive-Local"
 
 echo "Running initial one-time bisync resync..."
-rclone bisync OneDrive:Media/Wallpapers "$LOCAL_WALLPAPER_DIR" --resync --verbose
+run_as_target_user rclone bisync OneDrive:Media/Wallpapers "$LOCAL_WALLPAPER_DIR" --resync --verbose
 
-current_crontab="$(crontab -l 2>/dev/null || true)"
+if [[ "$(id -u)" -eq 0 ]]; then
+  current_crontab="$(crontab -u "$TARGET_USER" -l 2>/dev/null || true)"
+else
+  current_crontab="$(crontab -l 2>/dev/null || true)"
+fi
 desired_crontab="$(printf "%s\n" "${DESIRED_CRON_ENTRIES[@]}")"
 
 if [[ "$(printf "%s\n" "$current_crontab" | normalize_crontab)" == "$(printf "%s\n" "$desired_crontab" | normalize_crontab)" ]]; then
   echo "Crontab already matches desired entries. No changes made."
 else
-  printf "%s\n" "${DESIRED_CRON_ENTRIES[@]}" | crontab -
+  if [[ "$(id -u)" -eq 0 ]]; then
+    printf "%s\n" "${DESIRED_CRON_ENTRIES[@]}" | crontab -u "$TARGET_USER" -
+  else
+    printf "%s\n" "${DESIRED_CRON_ENTRIES[@]}" | crontab -
+  fi
   echo "Crontab updated. Only desired entries are present now."
 fi
 
