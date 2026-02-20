@@ -13,6 +13,7 @@ fi
 COMPOSE_DIR="$TARGET_HOME/.local/share/docker/ollama"
 COMPOSE_FILE="$COMPOSE_DIR/compose.yml"
 OLLAMA_MODEL="dolphin-llama3:8b"   # uncensored Llama 3 fine-tune; no built-in content restrictions
+SD_MODELS_DIR="$COMPOSE_DIR/sd-models"  # host-mounted dir; place .safetensors/.ckpt files here
 
 # ---------------------------------------------------------------
 # Docker CE
@@ -82,12 +83,24 @@ else
 fi
 
 # ---------------------------------------------------------------
-# Docker Compose file for Ollama + Open WebUI
+# Docker Compose file for Ollama + AUTOMATIC1111 + Open WebUI
 # ---------------------------------------------------------------
 echo "Writing Docker Compose config to $COMPOSE_FILE..."
 mkdir -p "$COMPOSE_DIR"
+mkdir -p "$SD_MODELS_DIR"
 
-cat > "$COMPOSE_FILE" <<'EOF'
+# AUTOMATIC1111 config: disable the built-in NSFW safety filter so the API
+# returns images as-is without blacking out flagged content.  This is an
+# intentional, user-requested choice for a private, local-only deployment.
+cat > "$COMPOSE_DIR/sd-config.json" <<'EOF'
+{
+  "filter_nsfw": false
+}
+EOF
+
+# Use a non-quoted heredoc so $SD_MODELS_DIR is expanded to an absolute path,
+# avoiding any ambiguity about the working directory at docker-compose runtime.
+cat > "$COMPOSE_FILE" <<EOF
 services:
   ollama:
     image: ollama/ollama:latest
@@ -101,13 +114,31 @@ services:
       - "11434:11434"
     restart: unless-stopped
 
+  automatic1111:
+    image: ghcr.io/jim60105/stable-diffusion-webui:latest
+    container_name: automatic1111
+    runtime: nvidia
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - CLI_ARGS=--api --disable-safe-unpickle
+    volumes:
+      - $COMPOSE_DIR/sd-config.json:/data/config.json:ro
+      - $SD_MODELS_DIR:/data/models/Stable-diffusion
+      - sd-outputs:/data/outputs
+    ports:
+      - "7860:7860"
+    restart: unless-stopped
+
   open-webui:
     image: ghcr.io/open-webui/open-webui:main
     container_name: open-webui
     depends_on:
       - ollama
+      - automatic1111
     environment:
       - OLLAMA_BASE_URL=http://ollama:11434
+      - ENABLE_IMAGE_GENERATION=true
+      - AUTOMATIC1111_BASE_URL=http://automatic1111:7860
     volumes:
       - open-webui:/app/backend/data
     ports:
@@ -117,6 +148,7 @@ services:
 volumes:
   ollama:
   open-webui:
+  sd-outputs:
 EOF
 
 if [[ "$(id -u)" -eq 0 ]]; then
@@ -126,8 +158,8 @@ fi
 # ---------------------------------------------------------------
 # Start containers
 # ---------------------------------------------------------------
-echo "Starting Ollama and Open WebUI containers..."
-echo "  (Docker will pull the Ollama and Open WebUI images if not already cached — this may take several minutes)"
+echo "Starting Ollama, AUTOMATIC1111, and Open WebUI containers..."
+echo "  (Docker will pull images if not already cached — this may take several minutes)"
 sudo docker compose -f "$COMPOSE_FILE" up -d --remove-orphans
 
 # ---------------------------------------------------------------
@@ -152,8 +184,16 @@ sudo docker exec ollama ollama pull "$OLLAMA_MODEL"
 
 echo ""
 echo "Setup complete."
-echo "  Open WebUI: http://localhost:3000"
-echo "  Ollama API: http://localhost:11434"
+echo "  Open WebUI:    http://localhost:3000"
+echo "  AUTOMATIC1111: http://localhost:7860"
+echo "  Ollama API:    http://localhost:11434"
 echo ""
 echo "On first launch, create an admin account at http://localhost:3000"
-echo "The $OLLAMA_MODEL model is ready to use."
+echo "The $OLLAMA_MODEL model is ready for text generation."
+echo ""
+echo "For image generation, place Stable Diffusion model files (.safetensors or .ckpt) in:"
+echo "  $SD_MODELS_DIR"
+echo "Then restart the image generator: sudo docker compose -f $COMPOSE_FILE restart automatic1111"
+echo ""
+echo "Image generation is pre-configured in Open WebUI (Settings > Images)."
+echo "NSFW filtering is disabled — the image generator will produce unfiltered output."
