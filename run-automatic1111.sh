@@ -36,8 +36,10 @@ DATA_DIR="${HOME}/.automatic1111"
 PORT=7860
 
 # DreamShaper 8 — publicly accessible on Hugging Face, no account required.
-MODEL_FILENAME="DreamShaper_8_pruned.safetensors"
-MODEL_URL="https://huggingface.co/Lykon/dreamshaper-8/resolve/main/${MODEL_FILENAME}"
+MODEL_FILENAME="Dreamshaper_8.safetensors"
+MODEL_URL_PRIMARY="https://huggingface.co/Lykon/dreamshaper-8/resolve/main/${MODEL_FILENAME}"
+# Mirror: digiplay hosts the same checkpoint under a lowercase filename
+MODEL_URL_FALLBACK="https://huggingface.co/digiplay/DreamShaper_8/resolve/main/dreamshaper_8.safetensors"
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*"; }
@@ -131,11 +133,31 @@ if [[ ! -f "${MODEL_PATH}" ]]; then
     log "Downloading model: ${MODEL_FILENAME}"
     log "This will take several minutes depending on your connection (file is ~2 GB)."
     PARTIAL="${MODEL_PATH}.partial"
-    if command -v wget &>/dev/null; then
-        wget -c --progress=bar:force:noscroll -O "${PARTIAL}" "${MODEL_URL}"
-    else
-        curl -L --progress-bar -C - -o "${PARTIAL}" "${MODEL_URL}"
+
+    download_model() {
+        local url="$1"
+        log "Trying URL: ${url}"
+        if command -v wget &>/dev/null; then
+            wget -c --progress=bar:force:noscroll -O "${PARTIAL}" "${url}" && return 0
+        else
+            curl -L --progress-bar -C - -o "${PARTIAL}" "${url}" && return 0
+        fi
+        return 1
+    }
+
+    if ! download_model "${MODEL_URL_PRIMARY}"; then
+        log "Primary URL failed; trying fallback mirror..."
+        MODEL_FILENAME="dreamshaper_8.safetensors"
+        MODEL_PATH="${DATA_DIR}/models/Stable-diffusion/${MODEL_FILENAME}"
+        PARTIAL="${MODEL_PATH}.partial"
+        if ! download_model "${MODEL_URL_FALLBACK}"; then
+            log "Error: could not download the model from any source."
+            rm -f "${PARTIAL}"
+            exit 1
+        fi
+        log "Fallback download succeeded; model saved as: ${MODEL_FILENAME}"
     fi
+
     mv "${PARTIAL}" "${MODEL_PATH}"
     log "Model downloaded: ${MODEL_FILENAME}"
 else
