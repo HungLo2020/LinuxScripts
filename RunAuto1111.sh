@@ -90,7 +90,7 @@ sudo docker run -d \
   -v "${DATA_DIR}/outputs:/stable-diffusion-webui/outputs" \
   -v "${DATA_DIR}/extensions:/stable-diffusion-webui/extensions" \
   "$IMAGE" \
-  --listen --xformers --api --no-half --skip-torch-cuda-test
+  --listen --xformers --api --no-half --skip-torch-cuda-test --no-download-sd-model
 
 # ─── Wait for ready ───────────────────────────────────────────────────────────
 
