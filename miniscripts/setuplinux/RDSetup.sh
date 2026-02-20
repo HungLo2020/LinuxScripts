@@ -65,3 +65,11 @@ rm -f "$RUSTDESK_FILE"
 rmdir "$RUSTDESK_DOWNLOAD_DIR" 2>/dev/null || true
 
 echo "RustDesk installed and cleanup complete."
+
+echo "Installing OpenSSH Server..."
+sudo apt update
+sudo apt install -y openssh-server
+echo "Enabling and starting sshd service..."
+sudo systemctl enable ssh
+sudo systemctl start ssh
+echo "Setup complete. Tailscale, RustDesk, and OpenSSH Server are installed and running."
