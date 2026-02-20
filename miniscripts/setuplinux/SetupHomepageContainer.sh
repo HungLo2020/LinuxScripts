@@ -64,23 +64,24 @@ fi
 
 # ─── Portainer Container ──────────────────────────────────────────────────────
 
-if sudo docker ps --filter "name=^${CONTAINER_NAME}$" --format '{{.Names}}' | grep -q "^${CONTAINER_NAME}$"; then
-  echo "Portainer container is already running."
-elif sudo docker ps -a --filter "name=^${CONTAINER_NAME}$" --format '{{.Names}}' | grep -q "^${CONTAINER_NAME}$"; then
-  echo "Portainer container exists but is stopped. Starting it..."
-  sudo docker start "$CONTAINER_NAME"
-else
-  echo "Creating and starting Portainer container..."
-  sudo docker run -d \
-    --name "$CONTAINER_NAME" \
-    --restart always \
-    -p "${AGENT_PORT}:8000" \
-    -p "${HTTPS_PORT}:9443" \
-    -p "${HTTP_PORT}:9000" \
-    -v /var/run/docker.sock:/var/run/docker.sock \
-    -v "${PORTAINER_VOLUME}:/data" \
-    "$PORTAINER_IMAGE"
+# Always remove and recreate the container so config changes (e.g. password
+# policy) take effect on re-runs. Data is safe because it lives in the volume.
+if sudo docker ps -a --filter "name=^${CONTAINER_NAME}$" --format '{{.Names}}' | grep -q "^${CONTAINER_NAME}$"; then
+  echo "Removing existing Portainer container to apply current configuration..."
+  sudo docker rm -f "$CONTAINER_NAME"
 fi
+
+echo "Creating and starting Portainer container..."
+sudo docker run -d \
+  --name "$CONTAINER_NAME" \
+  --restart always \
+  -p "${AGENT_PORT}:8000" \
+  -p "${HTTPS_PORT}:9443" \
+  -p "${HTTP_PORT}:9000" \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  -v "${PORTAINER_VOLUME}:/data" \
+  "$PORTAINER_IMAGE" \
+  --min-required-password-length 10
 
 # ─── Done ─────────────────────────────────────────────────────────────────────
 
