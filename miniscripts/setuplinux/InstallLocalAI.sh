@@ -12,328 +12,71 @@ fi
 
 COMPOSE_DIR="$TARGET_HOME/.local/share/docker/ollama"
 COMPOSE_FILE="$COMPOSE_DIR/compose.yml"
-OLLAMA_MODEL="dolphin-llama3:8b"   # uncensored Llama 3 fine-tune; no built-in content restrictions
-SD_MODELS_DIR="$COMPOSE_DIR/sd-models"  # host-mounted dir for Stable Diffusion checkpoints
-# Stable Diffusion 2.1 768-v — publicly accessible on Hugging Face without authentication
-# The .yaml file tells AUTOMATIC1111 this is a v-prediction model; without it the model is skipped.
-SD_MODEL_FILE="v2-1_768-ema-pruned.safetensors"
-SD_MODEL_URL="https://huggingface.co/stabilityai/stable-diffusion-2-1/resolve/main/v2-1_768-ema-pruned.safetensors"
-SD_MODEL_YAML="v2-1_768-ema-pruned.yaml"
+
+echo "================================================================"
+echo " Removing Local AI stack (Ollama + AUTOMATIC1111 + Open WebUI)"
+echo "================================================================"
 
 # ---------------------------------------------------------------
-# Docker CE
+# Stop and remove containers via compose (if compose file exists)
 # ---------------------------------------------------------------
-if command -v docker >/dev/null 2>&1; then
-  echo "Docker is already installed: $(docker --version)"
+if [[ -f "$COMPOSE_FILE" ]]; then
+  echo "Stopping and removing containers..."
+  sudo docker compose -f "$COMPOSE_FILE" down --volumes --remove-orphans 2>/dev/null || true
 else
-  echo "Installing Docker CE..."
-  sudo apt install -y ca-certificates curl gnupg
-
-  sudo install -m 0755 -d /etc/apt/keyrings
-  curl -fsSL https://download.docker.com/linux/ubuntu/gpg \
-    | sudo gpg --batch --yes --dearmor -o /etc/apt/keyrings/docker.gpg
-  sudo chmod a+r /etc/apt/keyrings/docker.gpg
-
-  echo \
-    "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] \
-https://download.docker.com/linux/ubuntu \
-$(lsb_release -cs) stable" \
-    | sudo tee /etc/apt/sources.list.d/docker.list >/dev/null
-
-  sudo apt update
-  sudo apt install -y \
-    docker-ce \
-    docker-ce-cli \
-    containerd.io \
-    docker-buildx-plugin \
-    docker-compose-plugin
-
-  echo "Docker CE installed."
+  echo "No compose file found at $COMPOSE_FILE — stopping containers by name..."
 fi
 
-# ---------------------------------------------------------------
-# Add user to docker group
-# ---------------------------------------------------------------
-if id -nG "$TARGET_USER" | grep -qw docker; then
-  echo "User '$TARGET_USER' is already in the docker group."
-else
-  echo "Adding '$TARGET_USER' to the docker group..."
-  sudo usermod -aG docker "$TARGET_USER"
-  echo "NOTE: A log out and back in (or 'newgrp docker') is required for the group change to take effect."
-fi
-
-# ---------------------------------------------------------------
-# NVIDIA Container Toolkit
-# ---------------------------------------------------------------
-if dpkg -s nvidia-container-toolkit >/dev/null 2>&1; then
-  echo "nvidia-container-toolkit is already installed."
-else
-  echo "Installing NVIDIA Container Toolkit..."
-
-  curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey \
-    | sudo gpg --batch --yes --dearmor -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg
-
-  curl -fsSL https://nvidia.github.io/libnvidia-container/stable/deb/nvidia-container-toolkit.list \
-    | sed 's#deb https://#deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://#g' \
-    | sudo tee /etc/apt/sources.list.d/nvidia-container-toolkit.list >/dev/null
-
-  sudo apt update
-  sudo apt install -y nvidia-container-toolkit
-
-  echo "Configuring Docker to use the NVIDIA runtime..."
-  sudo nvidia-ctk runtime configure --runtime=docker
-  sudo systemctl restart docker
-
-  echo "NVIDIA Container Toolkit installed."
-fi
-
-# ---------------------------------------------------------------
-# Docker Compose file for Ollama + AUTOMATIC1111 + Open WebUI
-# ---------------------------------------------------------------
-echo "Writing Docker Compose config to $COMPOSE_FILE..."
-mkdir -p "$COMPOSE_DIR"
-mkdir -p "$SD_MODELS_DIR"
-
-# ---------------------------------------------------------------
-# Download Stable Diffusion model
-# ---------------------------------------------------------------
-if [[ -f "$SD_MODELS_DIR/$SD_MODEL_FILE" ]]; then
-  echo "Stable Diffusion model already present: $SD_MODEL_FILE"
-else
-  echo "Downloading Stable Diffusion model ($SD_MODEL_FILE) — this may take several minutes (~5.2 GB)..."
-  curl -L --progress-bar \
-    -o "$SD_MODELS_DIR/$SD_MODEL_FILE.tmp" \
-    "$SD_MODEL_URL" \
-    || { rm -f "$SD_MODELS_DIR/$SD_MODEL_FILE.tmp"; echo "Error: Failed to download Stable Diffusion model."; exit 1; }
-  mv "$SD_MODELS_DIR/$SD_MODEL_FILE.tmp" "$SD_MODELS_DIR/$SD_MODEL_FILE"
-  echo "Stable Diffusion model downloaded."
-fi
-
-# SD 2.1 768-v requires a yaml config so AUTOMATIC1111 knows to use v-prediction sampling.
-# Without this file the model is silently skipped at startup.
-# Content sourced from the official Stability AI stablediffusion repo (now archived).
-if [[ -f "$SD_MODELS_DIR/$SD_MODEL_YAML" ]]; then
-  echo "Stable Diffusion model config already present: $SD_MODEL_YAML"
-else
-  echo "Writing Stable Diffusion model config ($SD_MODEL_YAML)..."
-  cat > "$SD_MODELS_DIR/$SD_MODEL_YAML" <<'SDYAML'
-model:
-  base_learning_rate: 1.0e-4
-  target: ldm.models.diffusion.ddpm.LatentDiffusion
-  params:
-    parameterization: "v"
-    linear_start: 0.00085
-    linear_end: 0.0120
-    num_timesteps_cond: 1
-    log_every_t: 200
-    timesteps: 1000
-    first_stage_key: "jpg"
-    cond_stage_key: "txt"
-    image_size: 96
-    channels: 4
-    cond_stage_trainable: false
-    conditioning_key: crossattn
-    monitor: val/loss_simple_ema
-    scale_factor: 0.18215
-    use_ema: False
-
-    unet_config:
-      target: ldm.modules.diffusionmodules.openaimodel.UNetModel
-      params:
-        use_checkpoint: True
-        use_fp16: True
-        image_size: 32
-        in_channels: 4
-        out_channels: 4
-        model_channels: 320
-        attention_resolutions: [ 4, 2, 1 ]
-        num_res_blocks: 2
-        channel_mult: [ 1, 2, 4, 4 ]
-        num_head_channels: 64
-        use_spatial_transformer: True
-        use_linear_in_transformer: True
-        transformer_depth: 1
-        context_dim: 1024
-        legacy: False
-
-    first_stage_config:
-      target: ldm.models.autoencoder.AutoencoderKL
-      params:
-        embed_dim: 4
-        monitor: val/rec_loss
-        ddconfig:
-          double_z: true
-          z_channels: 4
-          resolution: 256
-          in_channels: 3
-          out_channels: 3
-          ch: 128
-          ch_mult: [ 1, 2, 4, 4 ]
-          num_res_blocks: 2
-          attn_resolutions: [ ]
-          dropout: 0.0
-        lossconfig:
-          target: torch.nn.modules.loss.Identity
-
-    cond_stage_config:
-      target: ldm.modules.encoders.modules.FrozenOpenCLIPEmbedder
-      params:
-        freeze: True
-        layer: "penultimate"
-SDYAML
-  echo "Stable Diffusion model config written."
-fi
-
-# AUTOMATIC1111 config: disable the built-in NSFW safety filter so the API
-# returns images as-is without blacking out flagged content.  This is an
-# intentional, user-requested choice for a private, local-only deployment.
-cat > "$COMPOSE_DIR/sd-config.json" <<'EOF'
-{
-  "filter_nsfw": false
-}
-EOF
-
-# Use a non-quoted heredoc so $SD_MODELS_DIR is expanded to an absolute path,
-# avoiding any ambiguity about the working directory at docker-compose runtime.
-cat > "$COMPOSE_FILE" <<EOF
-services:
-  ollama:
-    image: ollama/ollama:latest
-    container_name: ollama
-    runtime: nvidia
-    environment:
-      - NVIDIA_VISIBLE_DEVICES=all
-    volumes:
-      - ollama:/root/.ollama
-    ports:
-      - "11434:11434"
-    restart: unless-stopped
-
-  automatic1111:
-    image: ghcr.io/jim60105/stable-diffusion-webui:latest
-    container_name: automatic1111
-    runtime: nvidia
-    environment:
-      - NVIDIA_VISIBLE_DEVICES=all
-      - CLI_ARGS=--listen --api --disable-safe-unpickle
-    volumes:
-      - $COMPOSE_DIR/sd-config.json:/data/config.json:ro
-      - $SD_MODELS_DIR:/data/models/Stable-diffusion
-      - sd-outputs:/data/outputs
-    ports:
-      - "7860:7860"
-    restart: unless-stopped
-
-  open-webui:
-    image: ghcr.io/open-webui/open-webui:main
-    container_name: open-webui
-    depends_on:
-      - ollama
-      - automatic1111
-    environment:
-      - OLLAMA_BASE_URL=http://ollama:11434
-      - ENABLE_IMAGE_GENERATION=true
-      - IMAGE_GENERATION_ENGINE=automatic1111
-      - AUTOMATIC1111_BASE_URL=http://automatic1111:7860
-    volumes:
-      - open-webui:/app/backend/data
-    ports:
-      - "3000:8080"
-    restart: unless-stopped
-
-volumes:
-  ollama:
-  open-webui:
-  sd-outputs:
-EOF
-
-if [[ "$(id -u)" -eq 0 ]]; then
-  chown -R "$TARGET_USER:$(id -gn "$TARGET_USER")" "$COMPOSE_DIR"
-fi
-
-# ---------------------------------------------------------------
-# Start containers
-# ---------------------------------------------------------------
-echo "Starting Ollama, AUTOMATIC1111, and Open WebUI containers..."
-echo "  (Docker will pull images if not already cached — this may take several minutes)"
-sudo docker compose -f "$COMPOSE_FILE" up -d --remove-orphans
-
-# ---------------------------------------------------------------
-# Pull Ollama model
-# ---------------------------------------------------------------
-echo "Waiting for Ollama container to be ready..."
-for i in {1..60}; do
-  if sudo docker exec ollama ollama list >/dev/null 2>&1; then
-    break
+# Belt-and-suspenders: remove any lingering named containers individually
+for container in ollama automatic1111 open-webui; do
+  if [[ -n "$(sudo docker ps -aq --filter "name=^${container}$" 2>/dev/null)" ]]; then
+    echo "  Removing container: $container"
+    sudo docker rm -f "$container" 2>/dev/null || true
   fi
-  echo "  Waiting... ($i/60)"
-  sleep 5
 done
 
-if ! sudo docker exec ollama ollama list >/dev/null 2>&1; then
-  echo "Error: Ollama container did not become ready in time."
-  exit 1
-fi
-
-echo "Pulling $OLLAMA_MODEL (this may take a while — the model is ~4.7 GB)..."
-sudo docker exec ollama ollama pull "$OLLAMA_MODEL"
-
 # ---------------------------------------------------------------
-# Wait for AUTOMATIC1111 to be ready
+# Remove Docker named volumes
 # ---------------------------------------------------------------
-echo "Waiting for AUTOMATIC1111 to finish loading the Stable Diffusion model..."
-echo "  (This can take several minutes on first start)"
-for i in {1..120}; do
-  if curl -sf http://localhost:7860/sdapi/v1/sd-models >/dev/null 2>&1; then
-    break
+echo "Removing Docker volumes..."
+for volume in ollama open-webui sd-outputs; do
+  if [[ -n "$(sudo docker volume ls -q --filter "name=^${volume}$" 2>/dev/null)" ]]; then
+    echo "  Removing volume: $volume"
+    sudo docker volume rm "$volume" 2>/dev/null || true
   fi
-  echo "  Waiting... ($i/120)"
-  sleep 5
 done
 
-if ! curl -sf http://localhost:7860/sdapi/v1/sd-models >/dev/null 2>&1; then
-  echo "Warning: AUTOMATIC1111 did not become ready in time."
-  echo "  Image generation may not be available immediately — check 'sudo docker logs automatic1111'."
+# ---------------------------------------------------------------
+# Remove Docker images
+# ---------------------------------------------------------------
+echo "Removing Docker images..."
+for image in \
+    "ollama/ollama:latest" \
+    "ghcr.io/open-webui/open-webui:main" \
+    "ghcr.io/jim60105/stable-diffusion-webui:latest"; do
+  if sudo docker image inspect "$image" >/dev/null 2>&1; then
+    echo "  Removing image: $image"
+    sudo docker rmi "$image" 2>/dev/null || true
+  fi
+done
+
+# ---------------------------------------------------------------
+# Delete the compose directory (models, config, yaml, compose file)
+# ---------------------------------------------------------------
+if [[ -d "$COMPOSE_DIR" ]]; then
+  echo "Deleting $COMPOSE_DIR (models and config)..."
+  sudo rm -rf "$COMPOSE_DIR"
+  echo "  Deleted."
+else
+  echo "Directory $COMPOSE_DIR does not exist — nothing to delete."
 fi
 
 echo ""
 echo "================================================================"
-echo " Setup complete."
+echo " Done. Everything has been removed."
+echo "  - Containers: stopped and deleted"
+echo "  - Docker volumes: deleted (all model data gone)"
+echo "  - Docker images: removed"
+echo "  - Model files and config: deleted ($COMPOSE_DIR)"
 echo "================================================================"
-echo "  Open WebUI:    http://localhost:3000  (main interface)"
-echo "  AUTOMATIC1111: http://localhost:7860  (image generator direct UI)"
-echo "  Ollama API:    http://localhost:11434"
-echo ""
-echo "On first launch, create an admin account at http://localhost:3000"
-echo ""
-echo "TEXT GENERATION"
-echo "  Model: $OLLAMA_MODEL"
-echo "  Use the chat interface at http://localhost:3000 as normal."
-echo ""
-echo "IMAGE GENERATION — IMPORTANT: how to use it"
-echo "  Stable Diffusion does NOT appear in the LLM model dropdown."
-echo "  It is a separate feature accessed one of these ways:"
-echo ""
-echo "  Option A (in-chat, easiest):"
-echo "    In any Open WebUI chat, click the image icon (camera/picture)"
-echo "    in the message input bar, then type your image prompt."
-echo ""
-echo "  Option B (dedicated page):"
-echo "    Open http://localhost:3000 > click the image/art icon in the"
-echo "    left sidebar to open the Image Generation page."
-echo ""
-echo "  Option C (slash command):"
-echo "    Type '/image a photo of a cat' in the chat input bar."
-echo ""
-echo "  If the image feature does not appear, go to:"
-echo "    Admin Panel (top-right menu) > Settings > Images"
-echo "  and confirm the AUTOMATIC1111 URL is set to:"
-echo "    http://automatic1111:7860"
-echo ""
-echo "  Model pre-downloaded: $SD_MODEL_FILE"
-echo "  To add more models, place .safetensors/.ckpt files in:"
-echo "    $SD_MODELS_DIR"
-echo "  Then run: sudo docker compose -f $COMPOSE_FILE restart automatic1111"
-echo ""
-echo "  NSFW filtering is disabled — the image generator produces unfiltered output."
-echo "================================================================"
+
