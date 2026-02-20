@@ -14,9 +14,12 @@ COMPOSE_DIR="$TARGET_HOME/.local/share/docker/ollama"
 COMPOSE_FILE="$COMPOSE_DIR/compose.yml"
 OLLAMA_MODEL="dolphin-llama3:8b"   # uncensored Llama 3 fine-tune; no built-in content restrictions
 SD_MODELS_DIR="$COMPOSE_DIR/sd-models"  # host-mounted dir for Stable Diffusion checkpoints
-# Stable Diffusion 2.1 — publicly accessible on Hugging Face without authentication
+# Stable Diffusion 2.1 768-v — publicly accessible on Hugging Face without authentication
+# The .yaml file tells AUTOMATIC1111 this is a v-prediction model; without it the model is skipped.
 SD_MODEL_FILE="v2-1_768-ema-pruned.safetensors"
 SD_MODEL_URL="https://huggingface.co/stabilityai/stable-diffusion-2-1/resolve/main/v2-1_768-ema-pruned.safetensors"
+SD_MODEL_YAML="v2-1_768-ema-pruned.yaml"
+SD_MODEL_YAML_URL="https://raw.githubusercontent.com/Stability-AI/stablediffusion/main/configs/stable-diffusion/v2-inference-v.yaml"
 
 # ---------------------------------------------------------------
 # Docker CE
@@ -105,6 +108,19 @@ else
     || { rm -f "$SD_MODELS_DIR/$SD_MODEL_FILE.tmp"; echo "Error: Failed to download Stable Diffusion model."; exit 1; }
   mv "$SD_MODELS_DIR/$SD_MODEL_FILE.tmp" "$SD_MODELS_DIR/$SD_MODEL_FILE"
   echo "Stable Diffusion model downloaded."
+fi
+
+# SD 2.1 768-v requires a yaml config so AUTOMATIC1111 knows to use v-prediction sampling.
+# Without this file the model is silently skipped at startup.
+if [[ -f "$SD_MODELS_DIR/$SD_MODEL_YAML" ]]; then
+  echo "Stable Diffusion model config already present: $SD_MODEL_YAML"
+else
+  echo "Downloading Stable Diffusion model config ($SD_MODEL_YAML)..."
+  curl -fsSL \
+    -o "$SD_MODELS_DIR/$SD_MODEL_YAML" \
+    "$SD_MODEL_YAML_URL" \
+    || { rm -f "$SD_MODELS_DIR/$SD_MODEL_YAML"; echo "Error: Failed to download model config yaml."; exit 1; }
+  echo "Stable Diffusion model config downloaded."
 fi
 
 # AUTOMATIC1111 config: disable the built-in NSFW safety filter so the API
@@ -207,31 +223,56 @@ sudo docker exec ollama ollama pull "$OLLAMA_MODEL"
 echo "Waiting for AUTOMATIC1111 to finish loading the Stable Diffusion model..."
 echo "  (This can take several minutes on first start)"
 for i in {1..120}; do
-  if sudo docker exec automatic1111 curl -sf http://localhost:7860/sdapi/v1/sd-models >/dev/null 2>&1; then
+  if curl -sf http://localhost:7860/sdapi/v1/sd-models >/dev/null 2>&1; then
     break
   fi
   echo "  Waiting... ($i/120)"
   sleep 5
 done
 
-if ! sudo docker exec automatic1111 curl -sf http://localhost:7860/sdapi/v1/sd-models >/dev/null 2>&1; then
+if ! curl -sf http://localhost:7860/sdapi/v1/sd-models >/dev/null 2>&1; then
   echo "Warning: AUTOMATIC1111 did not become ready in time."
   echo "  Image generation may not be available immediately — check 'sudo docker logs automatic1111'."
 fi
 
 echo ""
-echo "Setup complete."
-echo "  Open WebUI:    http://localhost:3000"
-echo "  AUTOMATIC1111: http://localhost:7860"
+echo "================================================================"
+echo " Setup complete."
+echo "================================================================"
+echo "  Open WebUI:    http://localhost:3000  (main interface)"
+echo "  AUTOMATIC1111: http://localhost:7860  (image generator direct UI)"
 echo "  Ollama API:    http://localhost:11434"
 echo ""
 echo "On first launch, create an admin account at http://localhost:3000"
-echo "The $OLLAMA_MODEL model is ready for text generation."
 echo ""
-echo "For image generation, the $SD_MODEL_FILE model has been pre-downloaded and is ready to use."
-echo "Additional Stable Diffusion model files (.safetensors or .ckpt) can be placed in:"
-echo "  $SD_MODELS_DIR"
-echo "Then restart the image generator: sudo docker compose -f $COMPOSE_FILE restart automatic1111"
+echo "TEXT GENERATION"
+echo "  Model: $OLLAMA_MODEL"
+echo "  Use the chat interface at http://localhost:3000 as normal."
 echo ""
-echo "Image generation is pre-configured in Open WebUI (Settings > Images)."
-echo "NSFW filtering is disabled — the image generator will produce unfiltered output."
+echo "IMAGE GENERATION — IMPORTANT: how to use it"
+echo "  Stable Diffusion does NOT appear in the LLM model dropdown."
+echo "  It is a separate feature accessed one of these ways:"
+echo ""
+echo "  Option A (in-chat, easiest):"
+echo "    In any Open WebUI chat, click the image icon (camera/picture)"
+echo "    in the message input bar, then type your image prompt."
+echo ""
+echo "  Option B (dedicated page):"
+echo "    Open http://localhost:3000 > click the image/art icon in the"
+echo "    left sidebar to open the Image Generation page."
+echo ""
+echo "  Option C (slash command):"
+echo "    Type '/image a photo of a cat' in the chat input bar."
+echo ""
+echo "  If the image feature does not appear, go to:"
+echo "    Admin Panel (top-right menu) > Settings > Images"
+echo "  and confirm the AUTOMATIC1111 URL is set to:"
+echo "    http://automatic1111:7860"
+echo ""
+echo "  Model pre-downloaded: $SD_MODEL_FILE"
+echo "  To add more models, place .safetensors/.ckpt files in:"
+echo "    $SD_MODELS_DIR"
+echo "  Then run: sudo docker compose -f $COMPOSE_FILE restart automatic1111"
+echo ""
+echo "  NSFW filtering is disabled — the image generator produces unfiltered output."
+echo "================================================================"
