@@ -62,7 +62,7 @@ fi
 
 echo "Ensuring Homepage config directory exists at $CONFIG_DIR..."
 mkdir -p "$CONFIG_DIR"
-chown -R "$TARGET_USER":"$TARGET_USER" "$CONFIG_DIR"
+sudo chown -R "$TARGET_USER":"$TARGET_USER" "$CONFIG_DIR"
 
 # Write starter config files only if they do not already exist,
 # so re-running this script never overwrites customisations.
