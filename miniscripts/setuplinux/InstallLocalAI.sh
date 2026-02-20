@@ -13,7 +13,10 @@ fi
 COMPOSE_DIR="$TARGET_HOME/.local/share/docker/ollama"
 COMPOSE_FILE="$COMPOSE_DIR/compose.yml"
 OLLAMA_MODEL="dolphin-llama3:8b"   # uncensored Llama 3 fine-tune; no built-in content restrictions
-SD_MODELS_DIR="$COMPOSE_DIR/sd-models"  # host-mounted dir; place .safetensors/.ckpt files here
+SD_MODELS_DIR="$COMPOSE_DIR/sd-models"  # host-mounted dir for Stable Diffusion checkpoints
+# Stable Diffusion 2.1 — publicly accessible on Hugging Face without authentication
+SD_MODEL_FILE="v2-1_768-ema-pruned.safetensors"
+SD_MODEL_URL="https://huggingface.co/stabilityai/stable-diffusion-2-1/resolve/main/v2-1_768-ema-pruned.safetensors"
 
 # ---------------------------------------------------------------
 # Docker CE
@@ -88,6 +91,21 @@ fi
 echo "Writing Docker Compose config to $COMPOSE_FILE..."
 mkdir -p "$COMPOSE_DIR"
 mkdir -p "$SD_MODELS_DIR"
+
+# ---------------------------------------------------------------
+# Download Stable Diffusion model
+# ---------------------------------------------------------------
+if [[ -f "$SD_MODELS_DIR/$SD_MODEL_FILE" ]]; then
+  echo "Stable Diffusion model already present: $SD_MODEL_FILE"
+else
+  echo "Downloading Stable Diffusion model ($SD_MODEL_FILE) — this may take several minutes (~5.2 GB)..."
+  curl -L --progress-bar \
+    -o "$SD_MODELS_DIR/$SD_MODEL_FILE.tmp" \
+    "$SD_MODEL_URL" \
+    || { rm -f "$SD_MODELS_DIR/$SD_MODEL_FILE.tmp"; echo "Error: Failed to download Stable Diffusion model."; exit 1; }
+  mv "$SD_MODELS_DIR/$SD_MODEL_FILE.tmp" "$SD_MODELS_DIR/$SD_MODEL_FILE"
+  echo "Stable Diffusion model downloaded."
+fi
 
 # AUTOMATIC1111 config: disable the built-in NSFW safety filter so the API
 # returns images as-is without blacking out flagged content.  This is an
@@ -191,7 +209,8 @@ echo ""
 echo "On first launch, create an admin account at http://localhost:3000"
 echo "The $OLLAMA_MODEL model is ready for text generation."
 echo ""
-echo "For image generation, place Stable Diffusion model files (.safetensors or .ckpt) in:"
+echo "For image generation, the $SD_MODEL_FILE model has been pre-downloaded and is ready to use."
+echo "Additional Stable Diffusion model files (.safetensors or .ckpt) can be placed in:"
 echo "  $SD_MODELS_DIR"
 echo "Then restart the image generator: sudo docker compose -f $COMPOSE_FILE restart automatic1111"
 echo ""
