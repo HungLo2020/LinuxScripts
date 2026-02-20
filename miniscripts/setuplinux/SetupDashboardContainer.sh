@@ -99,8 +99,11 @@ layout:
     style: row
     columns: 4'
 
-write_if_missing "$CONFIG_DIR/services.yaml" \
-"- Media:
+# services.yaml is always overwritten because it embeds the server's LAN IP,
+# which must stay accurate across re-runs.
+echo "Writing services.yaml with server IP ${LOCAL_IP}..."
+cat > "$CONFIG_DIR/services.yaml" << EOF
+- Media:
     - Plex:
         icon: plex.png
         href: http://${LOCAL_IP}:32400/web
@@ -114,7 +117,13 @@ write_if_missing "$CONFIG_DIR/services.yaml" \
     - Portainer:
         icon: portainer.png
         href: https://${LOCAL_IP}:9443
-        description: Container Management"
+        description: Container Management
+    - Homepage:
+        icon: homepage.png
+        href: http://${LOCAL_IP}:3000
+        description: This Dashboard
+EOF
+chown "$TARGET_USER":"$TARGET_USER" "$CONFIG_DIR/services.yaml"
 
 write_if_missing "$CONFIG_DIR/widgets.yaml" \
 '- resources:
