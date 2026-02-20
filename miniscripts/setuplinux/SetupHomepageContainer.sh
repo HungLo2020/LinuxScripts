@@ -83,6 +83,40 @@ sudo docker run -d \
   "$PORTAINER_IMAGE" \
   --min-required-password-length 10
 
+# ─── Firewall ─────────────────────────────────────────────────────────────────
+
+if command -v ufw >/dev/null 2>&1 && sudo ufw status | grep -q "Status: active"; then
+  echo "UFW is active — opening Portainer ports..."
+  sudo ufw allow "${HTTP_PORT}/tcp" comment "Portainer HTTP"
+  sudo ufw allow "${HTTPS_PORT}/tcp" comment "Portainer HTTPS"
+  sudo ufw allow "${AGENT_PORT}/tcp" comment "Portainer Agent"
+  echo "UFW rules added for ports ${HTTP_PORT}, ${HTTPS_PORT}, and ${AGENT_PORT}."
+else
+  echo "UFW is not active — skipping firewall rules."
+fi
+
+# ─── Health Check ─────────────────────────────────────────────────────────────
+
+echo "Waiting for Portainer to become ready..."
+HEALTH_TIMEOUT=30
+HEALTH_INTERVAL=2
+elapsed=0
+until curl -fsSk "https://localhost:${HTTPS_PORT}/api/status" >/dev/null 2>&1; do
+  if [[ $elapsed -ge $HEALTH_TIMEOUT ]]; then
+    echo ""
+    echo "ERROR: Portainer did not become ready within ${HEALTH_TIMEOUT} seconds."
+    echo "Container status:"
+    sudo docker inspect --format '{{.State.Status}} (exit code: {{.State.ExitCode}})' "$CONTAINER_NAME" || true
+    echo ""
+    echo "Recent container logs:"
+    sudo docker logs --tail 30 "$CONTAINER_NAME" || true
+    exit 1
+  fi
+  sleep "$HEALTH_INTERVAL"
+  elapsed=$(( elapsed + HEALTH_INTERVAL ))
+done
+echo "Portainer is ready."
+
 # ─── Done ─────────────────────────────────────────────────────────────────────
 
 LOCAL_IP="$(ip route get 1.1.1.1 2>/dev/null | awk 'NR==1{for(i=1;i<=NF;i++) if($i=="src"){print $(i+1); exit}}')"
@@ -97,6 +131,5 @@ echo "  HTTP:                http://${LOCAL_IP}:${HTTP_PORT}"
 echo ""
 echo "Access it from any device on your network using the URLs above."
 echo "On first visit, create your admin account within 5 minutes."
-echo "If the timeout passes, restart the container with: sudo docker restart ${CONTAINER_NAME}"
 echo ""
 echo "SetupHomepageContainer complete."
