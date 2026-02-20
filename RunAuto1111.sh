@@ -69,6 +69,21 @@ mkdir -p \
 
 echo "Data directory: ${DATA_DIR}"
 
+# ─── Download Default Model ───────────────────────────────────────────────────
+# Download SD v1.5 directly to the host models folder so A1111 finds it ready
+# on startup and never needs to prompt the user to download or overwrite anything.
+
+SD_MODEL_FILE="${DATA_DIR}/models/Stable-diffusion/v1-5-pruned-emaonly.safetensors"
+SD_MODEL_URL="https://huggingface.co/runwayml/stable-diffusion-v1-5/resolve/main/v1-5-pruned-emaonly.safetensors"
+
+if [[ -f "$SD_MODEL_FILE" ]]; then
+  echo "SD model already present: $(basename "$SD_MODEL_FILE") — skipping download."
+else
+  echo "Downloading SD v1.5 model (~4 GB)..."
+  wget --show-progress -q -c "$SD_MODEL_URL" -O "$SD_MODEL_FILE"
+  echo "Model downloaded: $SD_MODEL_FILE"
+fi
+
 # ─── Container ────────────────────────────────────────────────────────────────
 
 if sudo docker ps -a --filter "name=^${CONTAINER_NAME}$" --format '{{.Names}}' \
