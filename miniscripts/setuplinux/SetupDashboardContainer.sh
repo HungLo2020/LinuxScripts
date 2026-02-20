@@ -5,6 +5,11 @@ set -euo pipefail
 CONTAINER_NAME="homepage"
 HOMEPAGE_IMAGE="ghcr.io/gethomepage/homepage:latest"
 HTTP_PORT=3000
+REFRESH_PORT=9002
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+REFRESH_SCRIPT="$REPO_ROOT/miniscripts/notautorun/RefreshContainers.sh"
 
 TARGET_USER="${SUDO_USER:-$USER}"
 TARGET_HOME="$(getent passwd "$TARGET_USER" | cut -d: -f6)"
@@ -109,12 +114,18 @@ layout:
     style: row
     columns: 4'
 
-# services.yaml is always overwritten with an empty file.
-# Services are auto-discovered exclusively from Docker container labels —
-# no hardcoding here. This must always be reset so stale entries never appear.
-echo "" > "$CONFIG_DIR/services.yaml"
+# services.yaml is always overwritten. Docker-labelled containers (Portainer,
+# Homepage) are auto-discovered via the Docker socket. The Refresh Containers
+# tile is added here because ttyd runs on the host, not in a container.
+cat > "$CONFIG_DIR/services.yaml" << EOF
+- Management:
+    - Refresh Containers:
+        icon: bash.png
+        href: http://${TAILSCALE_IP}:${REFRESH_PORT}
+        description: Update scripts and refresh all containers
+EOF
 chown "$TARGET_USER":"$TARGET_USER" "$CONFIG_DIR/services.yaml"
-echo "Cleared services.yaml — services will be auto-discovered from Docker labels."
+echo "Written services.yaml with Refresh Containers tile."
 
 write_if_missing "$CONFIG_DIR/widgets.yaml" \
 '- resources:
@@ -167,12 +178,48 @@ sudo docker run -d \
   --label "homepage.group=Management" \
   "$HOMEPAGE_IMAGE"
 
+# ─── Refresh Terminal (ttyd) ──────────────────────────────────────────────────
+
+if ! command -v ttyd >/dev/null 2>&1; then
+  echo "Installing ttyd (web terminal for Refresh Containers tile)..."
+  sudo apt install -y ttyd
+else
+  echo "ttyd is already installed."
+fi
+
+if [[ ! -f "$REFRESH_SCRIPT" ]]; then
+  echo "ERROR: RefreshContainers.sh not found at: $REFRESH_SCRIPT"
+  exit 1
+fi
+
+REFRESH_SERVICE_PATH="/etc/systemd/system/homepage-refresh.service"
+echo "Writing homepage-refresh systemd service..."
+sudo tee "$REFRESH_SERVICE_PATH" > /dev/null << EOF
+[Unit]
+Description=Homepage Refresh Containers terminal (ttyd)
+After=network.target
+
+[Service]
+ExecStart=/usr/bin/ttyd -p ${REFRESH_PORT} -t fontSize=14 bash -c 'sudo bash ${REFRESH_SCRIPT}; echo ""; echo "Refresh complete. You may close this tab."; sleep 60'
+Restart=always
+User=${TARGET_USER}
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+echo "Enabling and restarting homepage-refresh service..."
+sudo systemctl daemon-reload
+sudo systemctl enable --now homepage-refresh.service
+sudo systemctl restart homepage-refresh.service
+
 # ─── Firewall ─────────────────────────────────────────────────────────────────
 
 if command -v ufw >/dev/null 2>&1 && sudo ufw status | grep -q "Status: active"; then
-  echo "UFW is active — opening Homepage port..."
+  echo "UFW is active — opening Homepage and Refresh ports..."
   sudo ufw allow "${HTTP_PORT}/tcp" comment "Homepage Dashboard" || true
-  echo "UFW rule added for port ${HTTP_PORT}."
+  sudo ufw allow "${REFRESH_PORT}/tcp" comment "Homepage Refresh Terminal" || true
+  echo "UFW rules added for ports ${HTTP_PORT} and ${REFRESH_PORT}."
 else
   echo "UFW is not active — skipping firewall rules."
 fi
@@ -203,18 +250,13 @@ echo "Homepage is ready."
 
 echo ""
 echo "Homepage dashboard is up and running."
-echo "  http://${TAILSCALE_IP}:${HTTP_PORT}"
+echo "  Dashboard:         http://${TAILSCALE_IP}:${HTTP_PORT}"
+echo "  Refresh terminal:  http://${TAILSCALE_IP}:${REFRESH_PORT}"
 echo ""
 echo "Accessible from anywhere on your Tailscale network."
 echo ""
-echo "To customise your dashboard, edit the YAML files in:"
-echo "  $CONFIG_DIR"
-echo ""
-echo "Key files:"
-echo "  services.yaml  — empty by default; services are auto-discovered from Docker labels"
-echo "  widgets.yaml   — top bar widgets (CPU, RAM, clock, etc.)"
-echo "  bookmarks.yaml — bookmark links"
-echo "  settings.yaml  — theme, layout, title"
+echo "The 'Refresh Containers' tile on the dashboard opens a browser terminal."
+echo "Click it to pull the latest scripts and recreate all containers."
 echo ""
 echo "To add a new container to the dashboard, add these labels to its docker run command:"
 echo "  --label homepage.name=\"My App\""
