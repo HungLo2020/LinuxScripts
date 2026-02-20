@@ -12,7 +12,7 @@ fi
 
 COMPOSE_DIR="$TARGET_HOME/.local/share/docker/ollama"
 COMPOSE_FILE="$COMPOSE_DIR/compose.yml"
-OLLAMA_MODEL="llama3.1:8b"
+OLLAMA_MODEL="dolphin-llama3:8b"   # uncensored Llama 3 fine-tune; no built-in content restrictions
 
 # ---------------------------------------------------------------
 # Docker CE
@@ -25,7 +25,7 @@ else
 
   sudo install -m 0755 -d /etc/apt/keyrings
   curl -fsSL https://download.docker.com/linux/ubuntu/gpg \
-    | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+    | sudo gpg --batch --yes --dearmor -o /etc/apt/keyrings/docker.gpg
   sudo chmod a+r /etc/apt/keyrings/docker.gpg
 
   echo \
@@ -65,7 +65,7 @@ else
   echo "Installing NVIDIA Container Toolkit..."
 
   curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey \
-    | sudo gpg --dearmor -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg
+    | sudo gpg --batch --yes --dearmor -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg
 
   curl -fsSL https://nvidia.github.io/libnvidia-container/stable/deb/nvidia-container-toolkit.list \
     | sed 's#deb https://#deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://#g' \
@@ -128,10 +128,10 @@ fi
 # ---------------------------------------------------------------
 echo "Starting Ollama and Open WebUI containers..."
 echo "  (Docker will pull the Ollama and Open WebUI images if not already cached — this may take several minutes)"
-sudo docker compose -f "$COMPOSE_FILE" up -d
+sudo docker compose -f "$COMPOSE_FILE" up -d --remove-orphans
 
 # ---------------------------------------------------------------
-# Pull LLaMA 3.1 8B model
+# Pull Ollama model
 # ---------------------------------------------------------------
 echo "Waiting for Ollama container to be ready..."
 for i in {1..60}; do
