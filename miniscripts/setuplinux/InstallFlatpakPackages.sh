@@ -21,6 +21,6 @@ for package in "${flatpak_packages[@]}"; do
 done
 
 echo "Installing Discord flatpak..."
-sudi flatpak install -y flathub com.discordapp.Discord
+sudo flatpak install -y flathub com.discordapp.Discord
 
 echo "Done installing Flatpak packages."
