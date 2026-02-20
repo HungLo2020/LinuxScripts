@@ -16,12 +16,22 @@ fi
 
 CONFIG_DIR="$TARGET_HOME/.config/homepage"
 
-# Detect the server's LAN IP early so it can be embedded in config URLs.
-# Links must use the server IP, not localhost, to work from other devices.
-LOCAL_IP="$(ip route get 1.1.1.1 2>/dev/null | awk 'NR==1{for(i=1;i<=NF;i++) if($i=="src"){print $(i+1); exit}}')"
-if [[ -z "$LOCAL_IP" ]]; then
-  LOCAL_IP="$(hostname -I 2>/dev/null | awk '{print $1}')"
+# ─── Tailscale Check ──────────────────────────────────────────────────────────
+
+if ! command -v tailscale >/dev/null 2>&1; then
+  echo "ERROR: Tailscale is not installed."
+  echo "Please run RDSetup.sh to install and configure Tailscale before running this script."
+  exit 1
 fi
+
+TAILSCALE_IP="$(tailscale ip -4 2>/dev/null || true)"
+if [[ -z "$TAILSCALE_IP" ]]; then
+  echo "ERROR: Tailscale is installed but not connected."
+  echo "Run 'sudo tailscale up' and log in before running this script."
+  exit 1
+fi
+
+echo "Tailscale is connected. Using Tailscale IP: ${TAILSCALE_IP}"
 
 # ─── Docker Installation ──────────────────────────────────────────────────────
 
@@ -99,31 +109,10 @@ layout:
     style: row
     columns: 4'
 
-# services.yaml is always overwritten because it embeds the server's LAN IP,
-# which must stay accurate across re-runs.
-echo "Writing services.yaml with server IP ${LOCAL_IP}..."
-cat > "$CONFIG_DIR/services.yaml" << EOF
-- Media:
-    - Plex:
-        icon: plex.png
-        href: http://${LOCAL_IP}:32400/web
-        description: Media Server
-    - Jellyfin:
-        icon: jellyfin.png
-        href: http://${LOCAL_IP}:8096
-        description: Media Server
-
-- Management:
-    - Portainer:
-        icon: portainer.png
-        href: https://${LOCAL_IP}:9443
-        description: Container Management
-    - Homepage:
-        icon: homepage.png
-        href: http://${LOCAL_IP}:3000
-        description: This Dashboard
-EOF
-chown "$TARGET_USER":"$TARGET_USER" "$CONFIG_DIR/services.yaml"
+# services.yaml is intentionally empty — services are auto-discovered from
+# Docker container labels. Add homepage.* labels to any container and
+# Homepage will pick them up automatically via the Docker socket.
+write_if_missing "$CONFIG_DIR/services.yaml" ''
 
 write_if_missing "$CONFIG_DIR/widgets.yaml" \
 '- resources:
@@ -169,6 +158,11 @@ sudo docker run -d \
   -e "HOMEPAGE_ALLOWED_HOSTS=*" \
   -v "${CONFIG_DIR}:/app/config" \
   -v /var/run/docker.sock:/var/run/docker.sock:ro \
+  --label "homepage.name=Homepage" \
+  --label "homepage.icon=homepage.png" \
+  --label "homepage.href=http://${TAILSCALE_IP}:${HTTP_PORT}" \
+  --label "homepage.description=This Dashboard" \
+  --label "homepage.group=Management" \
   "$HOMEPAGE_IMAGE"
 
 # ─── Firewall ─────────────────────────────────────────────────────────────────
@@ -207,17 +201,24 @@ echo "Homepage is ready."
 
 echo ""
 echo "Homepage dashboard is up and running."
-echo "  http://${LOCAL_IP}:${HTTP_PORT}"
+echo "  http://${TAILSCALE_IP}:${HTTP_PORT}"
 echo ""
-echo "Access it from any device on your network using the URL above."
+echo "Accessible from anywhere on your Tailscale network."
 echo ""
 echo "To customise your dashboard, edit the YAML files in:"
 echo "  $CONFIG_DIR"
 echo ""
 echo "Key files:"
-echo "  services.yaml  — your app tiles (add links to Plex, etc.)"
+echo "  services.yaml  — empty by default; services are auto-discovered from Docker labels"
 echo "  widgets.yaml   — top bar widgets (CPU, RAM, clock, etc.)"
 echo "  bookmarks.yaml — bookmark links"
 echo "  settings.yaml  — theme, layout, title"
+echo ""
+echo "To add a new container to the dashboard, add these labels to its docker run command:"
+echo "  --label homepage.name=\"My App\""
+echo "  --label homepage.icon=\"myapp.png\""
+echo "  --label homepage.href=\"http://${TAILSCALE_IP}:<port>\""
+echo "  --label homepage.description=\"My description\""
+echo "  --label homepage.group=\"My Group\""
 echo ""
 echo "SetupDashboardContainer complete."

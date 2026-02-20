@@ -9,6 +9,23 @@ HTTP_PORT=9000
 HTTPS_PORT=9443
 AGENT_PORT=8000
 
+# ─── Tailscale Check ──────────────────────────────────────────────────────────
+
+if ! command -v tailscale >/dev/null 2>&1; then
+  echo "ERROR: Tailscale is not installed."
+  echo "Please run RDSetup.sh to install and configure Tailscale before running this script."
+  exit 1
+fi
+
+TAILSCALE_IP="$(tailscale ip -4 2>/dev/null || true)"
+if [[ -z "$TAILSCALE_IP" ]]; then
+  echo "ERROR: Tailscale is installed but not connected."
+  echo "Run 'sudo tailscale up' and log in before running this script."
+  exit 1
+fi
+
+echo "Tailscale is connected. Using Tailscale IP: ${TAILSCALE_IP}"
+
 # ─── Docker Installation ──────────────────────────────────────────────────────
 
 if command -v docker >/dev/null 2>&1; then
@@ -80,6 +97,11 @@ sudo docker run -d \
   -p "${HTTP_PORT}:9000" \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -v "${PORTAINER_VOLUME}:/data" \
+  --label "homepage.name=Portainer" \
+  --label "homepage.icon=portainer.png" \
+  --label "homepage.href=https://${TAILSCALE_IP}:${HTTPS_PORT}" \
+  --label "homepage.description=Container Management" \
+  --label "homepage.group=Management" \
   "$PORTAINER_IMAGE"
 
 # ─── Firewall ─────────────────────────────────────────────────────────────────
@@ -118,17 +140,12 @@ echo "Portainer is ready."
 
 # ─── Done ─────────────────────────────────────────────────────────────────────
 
-LOCAL_IP="$(ip route get 1.1.1.1 2>/dev/null | awk 'NR==1{for(i=1;i<=NF;i++) if($i=="src"){print $(i+1); exit}}')"
-if [[ -z "$LOCAL_IP" ]]; then
-  LOCAL_IP="$(hostname -I 2>/dev/null | awk '{print $1}')"
-fi
-
 echo ""
 echo "Portainer is up and running."
-echo "  HTTPS (recommended): https://${LOCAL_IP}:${HTTPS_PORT}"
-echo "  HTTP:                http://${LOCAL_IP}:${HTTP_PORT}"
+echo "  HTTPS (recommended): https://${TAILSCALE_IP}:${HTTPS_PORT}"
+echo "  HTTP:                http://${TAILSCALE_IP}:${HTTP_PORT}"
 echo ""
-echo "Access it from any device on your network using the URLs above."
+echo "Accessible from anywhere on your Tailscale network."
 echo "On first visit, create your admin account within 5 minutes."
 echo ""
 echo "SetupHomepageContainer complete."
