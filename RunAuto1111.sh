@@ -90,9 +90,9 @@ sudo docker run -d \
   -v "${DATA_DIR}/outputs:/stable-diffusion-webui/outputs" \
   -v "${DATA_DIR}/extensions:/stable-diffusion-webui/extensions" \
   "$IMAGE" \
-  --listen --xformers --api --no-half
+  --listen --xformers --api --no-half --skip-torch-cuda-test
 
-# ─── Done ─────────────────────────────────────────────────────────────────────
+# ─── Wait for ready ───────────────────────────────────────────────────────────
 
 ACCESS_IP="$(tailscale ip -4 2>/dev/null || true)"
 if [[ -z "$ACCESS_IP" ]]; then
@@ -104,14 +104,61 @@ if [[ -z "$ACCESS_IP" ]]; then
 fi
 
 echo ""
-echo "auto1111 is starting up."
-echo "  http://${ACCESS_IP}:${HTTP_PORT}"
+echo "Waiting for auto1111 to finish loading (this takes several minutes on first run)..."
+echo "Showing container logs — ready when you see 'Running on local URL':"
+echo "──────────────────────────────────────────────────────────────────"
+
+READY=0
+TIMEOUT=600  # 10 minutes
+ELAPSED=0
+INTERVAL=5
+
+while [[ $ELAPSED -lt $TIMEOUT ]]; do
+  # Check if the container crashed
+  STATUS="$(sudo docker inspect --format '{{.State.Status}}' "$CONTAINER_NAME" 2>/dev/null || echo "missing")"
+  if [[ "$STATUS" == "exited" ]]; then
+    echo ""
+    echo "ERROR: auto1111 container exited unexpectedly."
+    echo "Container logs:"
+    sudo docker logs --tail 50 "$CONTAINER_NAME" || true
+    exit 1
+  fi
+
+  # Check if the web UI is responding
+  if curl -fsS "http://localhost:${HTTP_PORT}" >/dev/null 2>&1; then
+    READY=1
+    break
+  fi
+
+  # Print the last log line so the user can see progress
+  LAST_LOG="$(sudo docker logs --tail 1 "$CONTAINER_NAME" 2>/dev/null || true)"
+  if [[ -n "$LAST_LOG" ]]; then
+    printf "\r%-120s" "$LAST_LOG"
+  fi
+
+  sleep "$INTERVAL"
+  ELAPSED=$(( ELAPSED + INTERVAL ))
+done
+
 echo ""
-echo "First startup takes several minutes — models are being downloaded."
-echo "Watch progress with:  sudo docker logs -f ${CONTAINER_NAME}"
+echo "──────────────────────────────────────────────────────────────────"
+
+if [[ "$READY" -eq 0 ]]; then
+  echo "WARNING: auto1111 did not respond within ${TIMEOUT}s."
+  echo "It may still be loading. Check progress with:"
+  echo "  sudo docker logs -f ${CONTAINER_NAME}"
+  echo ""
+fi
+
+# ─── Done ─────────────────────────────────────────────────────────────────────
+
+echo ""
+echo "auto1111 is ready."
+echo "  http://${ACCESS_IP}:${HTTP_PORT}"
 echo ""
 echo "Drop .safetensors model files into:"
 echo "  ${DATA_DIR}/models/Stable-diffusion/"
+echo "Then click the refresh button next to the model dropdown in the UI."
 echo ""
 echo "To tear everything down and free disk space:"
 echo "  $(basename "$0") -n"
