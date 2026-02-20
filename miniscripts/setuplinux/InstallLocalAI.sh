@@ -19,7 +19,6 @@ SD_MODELS_DIR="$COMPOSE_DIR/sd-models"  # host-mounted dir for Stable Diffusion 
 SD_MODEL_FILE="v2-1_768-ema-pruned.safetensors"
 SD_MODEL_URL="https://huggingface.co/stabilityai/stable-diffusion-2-1/resolve/main/v2-1_768-ema-pruned.safetensors"
 SD_MODEL_YAML="v2-1_768-ema-pruned.yaml"
-SD_MODEL_YAML_URL="https://raw.githubusercontent.com/Stability-AI/stablediffusion/main/configs/stable-diffusion/v2-inference-v.yaml"
 
 # ---------------------------------------------------------------
 # Docker CE
@@ -112,15 +111,77 @@ fi
 
 # SD 2.1 768-v requires a yaml config so AUTOMATIC1111 knows to use v-prediction sampling.
 # Without this file the model is silently skipped at startup.
+# Content sourced from the official Stability AI stablediffusion repo (now archived).
 if [[ -f "$SD_MODELS_DIR/$SD_MODEL_YAML" ]]; then
   echo "Stable Diffusion model config already present: $SD_MODEL_YAML"
 else
-  echo "Downloading Stable Diffusion model config ($SD_MODEL_YAML)..."
-  curl -fsSL \
-    -o "$SD_MODELS_DIR/$SD_MODEL_YAML" \
-    "$SD_MODEL_YAML_URL" \
-    || { rm -f "$SD_MODELS_DIR/$SD_MODEL_YAML"; echo "Error: Failed to download model config yaml."; exit 1; }
-  echo "Stable Diffusion model config downloaded."
+  echo "Writing Stable Diffusion model config ($SD_MODEL_YAML)..."
+  cat > "$SD_MODELS_DIR/$SD_MODEL_YAML" <<'SDYAML'
+model:
+  base_learning_rate: 1.0e-4
+  target: ldm.models.diffusion.ddpm.LatentDiffusion
+  params:
+    parameterization: "v"
+    linear_start: 0.00085
+    linear_end: 0.0120
+    num_timesteps_cond: 1
+    log_every_t: 200
+    timesteps: 1000
+    first_stage_key: "jpg"
+    cond_stage_key: "txt"
+    image_size: 96
+    channels: 4
+    cond_stage_trainable: false
+    conditioning_key: crossattn
+    monitor: val/loss_simple_ema
+    scale_factor: 0.18215
+    use_ema: False
+
+    unet_config:
+      target: ldm.modules.diffusionmodules.openaimodel.UNetModel
+      params:
+        use_checkpoint: True
+        use_fp16: True
+        image_size: 32
+        in_channels: 4
+        out_channels: 4
+        model_channels: 320
+        attention_resolutions: [ 4, 2, 1 ]
+        num_res_blocks: 2
+        channel_mult: [ 1, 2, 4, 4 ]
+        num_head_channels: 64
+        use_spatial_transformer: True
+        use_linear_in_transformer: True
+        transformer_depth: 1
+        context_dim: 1024
+        legacy: False
+
+    first_stage_config:
+      target: ldm.models.autoencoder.AutoencoderKL
+      params:
+        embed_dim: 4
+        monitor: val/rec_loss
+        ddconfig:
+          double_z: true
+          z_channels: 4
+          resolution: 256
+          in_channels: 3
+          out_channels: 3
+          ch: 128
+          ch_mult: [ 1, 2, 4, 4 ]
+          num_res_blocks: 2
+          attn_resolutions: [ ]
+          dropout: 0.0
+        lossconfig:
+          target: torch.nn.modules.loss.Identity
+
+    cond_stage_config:
+      target: ldm.modules.encoders.modules.FrozenOpenCLIPEmbedder
+      params:
+        freeze: True
+        layer: "penultimate"
+SDYAML
+  echo "Stable Diffusion model config written."
 fi
 
 # AUTOMATIC1111 config: disable the built-in NSFW safety filter so the API
