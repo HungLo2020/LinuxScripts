@@ -138,7 +138,7 @@ services:
     runtime: nvidia
     environment:
       - NVIDIA_VISIBLE_DEVICES=all
-      - CLI_ARGS=--api --disable-safe-unpickle
+      - CLI_ARGS=--listen --api --disable-safe-unpickle
     volumes:
       - $COMPOSE_DIR/sd-config.json:/data/config.json:ro
       - $SD_MODELS_DIR:/data/models/Stable-diffusion
@@ -156,6 +156,7 @@ services:
     environment:
       - OLLAMA_BASE_URL=http://ollama:11434
       - ENABLE_IMAGE_GENERATION=true
+      - IMAGE_GENERATION_ENGINE=automatic1111
       - AUTOMATIC1111_BASE_URL=http://automatic1111:7860
     volumes:
       - open-webui:/app/backend/data
@@ -199,6 +200,24 @@ fi
 
 echo "Pulling $OLLAMA_MODEL (this may take a while — the model is ~4.7 GB)..."
 sudo docker exec ollama ollama pull "$OLLAMA_MODEL"
+
+# ---------------------------------------------------------------
+# Wait for AUTOMATIC1111 to be ready
+# ---------------------------------------------------------------
+echo "Waiting for AUTOMATIC1111 to finish loading the Stable Diffusion model..."
+echo "  (This can take several minutes on first start)"
+for i in {1..120}; do
+  if sudo docker exec automatic1111 curl -sf http://localhost:7860/sdapi/v1/sd-models >/dev/null 2>&1; then
+    break
+  fi
+  echo "  Waiting... ($i/120)"
+  sleep 5
+done
+
+if ! sudo docker exec automatic1111 curl -sf http://localhost:7860/sdapi/v1/sd-models >/dev/null 2>&1; then
+  echo "Warning: AUTOMATIC1111 did not become ready in time."
+  echo "  Image generation may not be available immediately — check 'sudo docker logs automatic1111'."
+fi
 
 echo ""
 echo "Setup complete."
