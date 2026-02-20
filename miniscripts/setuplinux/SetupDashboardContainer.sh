@@ -150,6 +150,7 @@ sudo docker run -d \
   --name "$CONTAINER_NAME" \
   --restart always \
   -p "${HTTP_PORT}:3000" \
+  -e "HOMEPAGE_ALLOWED_HOSTS=*" \
   -v "${CONFIG_DIR}:/app/config" \
   -v /var/run/docker.sock:/var/run/docker.sock:ro \
   "$HOMEPAGE_IMAGE"
