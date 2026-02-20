@@ -109,10 +109,12 @@ layout:
     style: row
     columns: 4'
 
-# services.yaml is intentionally empty — services are auto-discovered from
-# Docker container labels. Add homepage.* labels to any container and
-# Homepage will pick them up automatically via the Docker socket.
-write_if_missing "$CONFIG_DIR/services.yaml" ''
+# services.yaml is always overwritten with an empty file.
+# Services are auto-discovered exclusively from Docker container labels —
+# no hardcoding here. This must always be reset so stale entries never appear.
+echo "" > "$CONFIG_DIR/services.yaml"
+chown "$TARGET_USER":"$TARGET_USER" "$CONFIG_DIR/services.yaml"
+echo "Cleared services.yaml — services will be auto-discovered from Docker labels."
 
 write_if_missing "$CONFIG_DIR/widgets.yaml" \
 '- resources:
