@@ -14,6 +14,7 @@ packages=(
   "konsole"
   "dolphin"
   "fastfetch"
+  "curl"
 )
 
 echo "Installing default packages..."

@@ -5,6 +5,10 @@ set -euo pipefail
 TARGET_USER="${SUDO_USER:-$USER}"
 TARGET_HOME="$(getent passwd "$TARGET_USER" | cut -d: -f6)"
 
+# Install curl
+sudo apt update
+sudo apt install -y curl
+
 if [[ -z "$TARGET_HOME" || ! -d "$TARGET_HOME" ]]; then
   echo "Error: Could not determine home directory for user '$TARGET_USER'."
   exit 1
