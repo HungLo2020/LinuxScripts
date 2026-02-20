@@ -200,9 +200,9 @@ Description=Homepage Refresh Containers terminal (ttyd)
 After=network.target
 
 [Service]
-ExecStart=/usr/bin/ttyd -p ${REFRESH_PORT} -t fontSize=14 bash -c 'sudo bash ${REFRESH_SCRIPT}; echo ""; echo "Refresh complete. You may close this tab."; sleep 60'
+ExecStart=/usr/bin/ttyd -p ${REFRESH_PORT} -t fontSize=14 bash -c 'bash ${REFRESH_SCRIPT}; echo ""; echo "Refresh complete. You may close this tab."; sleep 60'
 Restart=always
-User=${TARGET_USER}
+User=root
 
 [Install]
 WantedBy=multi-user.target
