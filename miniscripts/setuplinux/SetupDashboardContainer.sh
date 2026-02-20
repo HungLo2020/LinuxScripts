@@ -16,6 +16,13 @@ fi
 
 CONFIG_DIR="$TARGET_HOME/.config/homepage"
 
+# Detect the server's LAN IP early so it can be embedded in config URLs.
+# Links must use the server IP, not localhost, to work from other devices.
+LOCAL_IP="$(ip route get 1.1.1.1 2>/dev/null | awk 'NR==1{for(i=1;i<=NF;i++) if($i=="src"){print $(i+1); exit}}')"
+if [[ -z "$LOCAL_IP" ]]; then
+  LOCAL_IP="$(hostname -I 2>/dev/null | awk '{print $1}')"
+fi
+
 # ─── Docker Installation ──────────────────────────────────────────────────────
 
 if command -v docker >/dev/null 2>&1; then
@@ -93,21 +100,21 @@ layout:
     columns: 4'
 
 write_if_missing "$CONFIG_DIR/services.yaml" \
-'- Media:
+"- Media:
     - Plex:
         icon: plex.png
-        href: http://localhost:32400/web
+        href: http://${LOCAL_IP}:32400/web
         description: Media Server
     - Jellyfin:
         icon: jellyfin.png
-        href: http://localhost:8096
+        href: http://${LOCAL_IP}:8096
         description: Media Server
 
 - Management:
     - Portainer:
         icon: portainer.png
-        href: https://localhost:9443
-        description: Container Management'
+        href: https://${LOCAL_IP}:9443
+        description: Container Management"
 
 write_if_missing "$CONFIG_DIR/widgets.yaml" \
 '- resources:
@@ -188,11 +195,6 @@ done
 echo "Homepage is ready."
 
 # ─── Done ─────────────────────────────────────────────────────────────────────
-
-LOCAL_IP="$(ip route get 1.1.1.1 2>/dev/null | awk 'NR==1{for(i=1;i<=NF;i++) if($i=="src"){print $(i+1); exit}}')"
-if [[ -z "$LOCAL_IP" ]]; then
-  LOCAL_IP="$(hostname -I 2>/dev/null | awk '{print $1}')"
-fi
 
 echo ""
 echo "Homepage dashboard is up and running."
