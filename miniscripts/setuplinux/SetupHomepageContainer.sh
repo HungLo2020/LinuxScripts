@@ -80,8 +80,7 @@ sudo docker run -d \
   -p "${HTTP_PORT}:9000" \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -v "${PORTAINER_VOLUME}:/data" \
-  "$PORTAINER_IMAGE" \
-  --min-required-password-length 10
+  "$PORTAINER_IMAGE"
 
 # ─── Firewall ─────────────────────────────────────────────────────────────────
 
