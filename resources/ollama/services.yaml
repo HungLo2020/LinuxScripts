@@ -1,0 +1,35 @@
+- AI Engines:
+    - Stable Diffusion:
+        href: http://localhost:7861
+        description: AUTOMATIC1111
+        icon: mdi-image-outline-#8b5cf6
+        server: local
+        container: automatic1111
+    - Open WebUI:
+        href: http://localhost:3000
+        description: LLM interface
+        icon: mdi-monitor-dashboard-#22c55e
+        server: local
+        container: open-webui
+
+- Interfaces:
+    - Homepage:
+        href: http://localhost:3001
+        description: Dashboard
+        icon: mdi-view-grid-outline-#f59e0b
+        server: local
+        container: homepage
+
+- Links:
+    - GitHub:
+        href: https://github.com/
+        description: Code hosting
+        icon: si-github-#181717
+    - YouTube:
+        href: https://www.youtube.com/
+        description: Video
+        icon: si-youtube-#ff0000
+    - Reddit:
+        href: https://www.reddit.com/
+        description: Community
+        icon: si-reddit-#ff4500
