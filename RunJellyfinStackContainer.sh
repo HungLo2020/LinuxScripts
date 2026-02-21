@@ -166,10 +166,11 @@ prompt_absolute_existing_dir() {
 
 write_env_file() {
   local media_path="$1"
-  local downloads_path="$2"
-  local nord_user="$3"
-  local nord_pass="$4"
-  local nord_country="$5"
+  local music_path="$2"
+  local downloads_path="$3"
+  local nord_user="$4"
+  local nord_pass="$5"
+  local nord_country="$6"
 
   mkdir -p "${STACK_ROOT}"
   cp -f "${ENV_TEMPLATE}" "${STACK_ENV_FILE}"
@@ -186,6 +187,7 @@ TZ=${tz}
 
 STACK_ROOT=${STACK_ROOT}
 MEDIA_PATH=${media_path}
+MUSIC_PATH=${music_path}
 DOWNLOADS_PATH=${downloads_path}
 
 NORDVPN_USER=${nord_user}
@@ -310,6 +312,12 @@ case "${ACTION}" in
       media_path="${media_path%/}"
     fi
 
+    log "Paste a second absolute library path (tip: use your music directory)."
+    music_path="$(prompt_absolute_existing_dir 'Second library path (music): ')"
+    if [[ "${music_path}" != "/" ]]; then
+      music_path="${music_path%/}"
+    fi
+
     read -r -p "Downloads path (Enter for ${media_path}/downloads): " downloads_path
     if [[ -z "${downloads_path}" ]]; then
       downloads_path="${media_path}/downloads"
@@ -329,7 +337,7 @@ case "${ACTION}" in
       nord_country="United States"
     fi
 
-    write_env_file "${media_path}" "${downloads_path}" "${nord_user}" "${nord_pass}" "${nord_country}"
+    write_env_file "${media_path}" "${music_path}" "${downloads_path}" "${nord_user}" "${nord_pass}" "${nord_country}"
     copy_compose_file
     start_stack
     ;;
