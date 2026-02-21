@@ -276,6 +276,9 @@ case "${ACTION}" in
   run)
     log "Paste the absolute path to your existing media root directory."
     media_path="$(prompt_absolute_existing_dir 'Media path: ')"
+    if [[ "${media_path}" != "/" ]]; then
+      media_path="${media_path%/}"
+    fi
 
     read -r -p "Downloads path (Enter for ${media_path}/downloads): " downloads_path
     if [[ -z "${downloads_path}" ]]; then
