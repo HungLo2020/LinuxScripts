@@ -36,7 +36,7 @@
 
 - Backend Services:
     - Sonarr:
-        href: http://localhost:8080/
+        href: http://localhost:8989/
         description: TV Show Management
         icon: https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/sonarr.png
         server: local
