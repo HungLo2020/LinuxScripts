@@ -19,6 +19,12 @@
         icon: https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/plex.png
         server: local
         container: plex
+    - Jellyfin:
+        href: http://localhost:8096/
+        description: Media Server
+        icon: https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/jellyfin.png
+        server: local
+        container: jellyfin
 
 - Interfaces:
     - Homepage:
