@@ -207,6 +207,32 @@ copy_compose_file() {
   cp -f "${COMPOSE_TEMPLATE}" "${STACK_COMPOSE_FILE}"
 }
 
+print_qbittorrent_credentials() {
+  local username="admin"
+  local password_line=""
+  local password_value=""
+  local i
+
+  for i in {1..15}; do
+    password_line="$(docker_exec logs qbittorrent 2>&1 | grep -i 'temporary password' | tail -n1 || true)"
+    if [[ -n "${password_line}" ]]; then
+      break
+    fi
+    sleep 1
+  done
+
+  if [[ -n "${password_line}" ]]; then
+    password_value="$(printf '%s' "${password_line}" | sed -E 's/.*session[: ]+//')"
+    log "qBittorrent login username: ${username}"
+    log "qBittorrent temporary password: ${password_value}"
+    log "Change this in qBittorrent WebUI after first login."
+  else
+    log "qBittorrent login username: ${username}"
+    log "Temporary password not found in logs (it may already be configured)."
+    log "To inspect manually: sudo docker logs qbittorrent | grep -i password"
+  fi
+}
+
 start_stack() {
   mkdir -p \
     "${STACK_ROOT}/config/jellyfin" \
@@ -225,6 +251,7 @@ start_stack() {
   log "Jackett:      http://localhost:9117"
   log "FlareSolverr: internal to Jackett at http://localhost:8191"
   log "qBittorrent:  http://localhost:8080"
+  print_qbittorrent_credentials
 }
 
 stop_stack() {
