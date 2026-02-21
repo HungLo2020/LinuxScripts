@@ -32,6 +32,9 @@ set -euo pipefail
 # ── Configuration ─────────────────────────────────────────────────────────────
 CONTAINER_NAME="automatic1111"
 IMAGE_NAME="automatic1111-webui"
+# Increment IMAGE_VERSION whenever the Dockerfile changes so stale cached
+# images are automatically detected and rebuilt.
+IMAGE_VERSION="2"
 DATA_DIR="${HOME}/.automatic1111"
 PORT=7860
 
@@ -164,8 +167,23 @@ else
     log "Model already present: ${MODEL_FILENAME}"
 fi
 
-# ── Build Docker image (once; image is cached for subsequent runs) ─────────────
+# ── Build Docker image (rebuild when Dockerfile version changes) ──────────────
+NEEDS_BUILD="false"
 if ! docker_exec images -q "${IMAGE_NAME}" 2>/dev/null | grep -q .; then
+    NEEDS_BUILD="true"
+else
+    existing_version=$(docker_exec inspect --format '{{index .Config.Labels "version"}}' \
+        "${IMAGE_NAME}" 2>/dev/null || echo "")
+    if [[ "${existing_version}" != "${IMAGE_VERSION}" ]]; then
+        log "Docker image is outdated (version ${existing_version:-unknown} → ${IMAGE_VERSION}); rebuilding..."
+        docker_exec rmi "${IMAGE_NAME}" 2>/dev/null || true
+        NEEDS_BUILD="true"
+    else
+        log "Docker image already exists and is up to date: ${IMAGE_NAME}"
+    fi
+fi
+
+if [[ "${NEEDS_BUILD}" == "true" ]]; then
     log "Building Docker image — this is a one-time step that may take 10-20 minutes."
 
     BUILD_CTX=$(mktemp -d)
@@ -174,6 +192,8 @@ if ! docker_exec images -q "${IMAGE_NAME}" 2>/dev/null | grep -q .; then
 
     cat > "${BUILD_CTX}/Dockerfile" << 'DOCKERFILE'
 FROM python:3.10.14-slim-bullseye
+
+LABEL version="2"
 
 ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONDONTWRITEBYTECODE=1 \
@@ -194,6 +214,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 RUN git clone --depth=1 https://github.com/AUTOMATIC1111/stable-diffusion-webui /app
 
+# Create a non-root user so webui.sh's root check passes.
+# webui.sh refuses to start when run as UID 0.
+RUN groupadd -g 1000 webui \
+    && useradd -m -u 1000 -g webui -s /bin/bash webui \
+    && chown -R webui:webui /app
+
 WORKDIR /app
 
 RUN mkdir -p \
@@ -201,15 +227,21 @@ RUN mkdir -p \
     /app/models/VAE \
     /app/outputs \
     /app/extensions \
-    /app/venv
+    /app/venv \
+    && chown -R webui:webui \
+        /app/models \
+        /app/outputs \
+        /app/extensions \
+        /app/venv
+
+USER webui
+ENV HOME=/home/webui
 
 EXPOSE 7860
 DOCKERFILE
 
     docker_exec build -t "${IMAGE_NAME}" "${BUILD_CTX}"
     log "Docker image built successfully."
-else
-    log "Docker image already exists: ${IMAGE_NAME}"
 fi
 
 # ── Remove any existing (stopped) container so we start clean ─────────────────
@@ -249,15 +281,30 @@ if [[ "${USE_GPU}" == "false" ]]; then
 fi
 
 # ── Build docker run arguments ────────────────────────────────────────────────
+# Run as the calling user's UID:GID so that files written to the mounted
+# volumes (models, outputs, venv) are owned by the host user, not by UID 1000.
+# This also satisfies webui.sh's check that the process is not running as root.
+HOST_UID=$(id -u)
+HOST_GID=$(id -g)
+
+if [[ "${HOST_UID}" == "0" ]]; then
+    log "Error: do not run this script as root. Log in as a regular user and re-run."
+    exit 1
+fi
+
+# Use /tmp as HOME so that any UID works without needing /home/<user> inside
+# the container (the Dockerfile only created /home/webui for UID 1000).
 DOCKER_RUN_ARGS=(
     --name "${CONTAINER_NAME}"
     --rm
+    --user "${HOST_UID}:${HOST_GID}"
     -p "${PORT}:7860"
     -v "${DATA_DIR}/models/Stable-diffusion:/app/models/Stable-diffusion"
     -v "${DATA_DIR}/outputs:/app/outputs"
     -v "${DATA_DIR}/venv:/app/venv"
     -v "${DATA_DIR}/extensions:/app/extensions"
     -e "COMMANDLINE_ARGS=${WEBUI_ARGS}"
+    -e HOME=/tmp
 )
 
 if [[ "${USE_GPU}" == "true" ]]; then
