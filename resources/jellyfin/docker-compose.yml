@@ -101,11 +101,12 @@ services:
   flaresolverr:
     image: ghcr.io/flaresolverr/flaresolverr:latest
     container_name: flaresolverr
+    depends_on:
+      - jackett
+    network_mode: "service:jackett"
     environment:
       - LOG_LEVEL=info
       - LOG_HTML=false
       - CAPTCHA_SOLVER=none
       - TZ=${TZ}
-    ports:
-      - ${FLARESOLVERR_PORT}:8191
     restart: unless-stopped

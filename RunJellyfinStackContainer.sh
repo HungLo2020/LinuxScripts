@@ -223,7 +223,7 @@ start_stack() {
   log "Radarr:       http://localhost:7878"
   log "Sonarr:       http://localhost:8989"
   log "Jackett:      http://localhost:9117"
-  log "FlareSolverr: http://localhost:8191"
+  log "FlareSolverr: internal to Jackett at http://localhost:8191"
   log "qBittorrent:  http://localhost:8080"
 }
 
