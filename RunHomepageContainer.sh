@@ -265,10 +265,10 @@ cp -f "${BOOKMARKS_TEMPLATE}" "${CONFIG_DIR}/bookmarks.yaml"
 cp -f "${DOCKER_TEMPLATE}" "${CONFIG_DIR}/docker.yaml"
 
 if [[ -n "${TAILSCALE_IP}" ]]; then
-    sed -i \
-        -e "s|http://localhost:|http://${TAILSCALE_IP}:|g" \
-        -e "s|http://127\\.0\\.0\\.1:|http://${TAILSCALE_IP}:|g" \
-        "${CONFIG_DIR}/services.yaml"
+    for cfg in "${CONFIG_DIR}/services.yaml" "${CONFIG_DIR}/widgets.yaml" "${CONFIG_DIR}/bookmarks.yaml"; do
+        [[ -f "${cfg}" ]] || continue
+        sed -E -i "s#(https?://)(localhost|127\\.0\\.0\\.1|\\[::1\\])#\\1${TAILSCALE_IP}#g" "${cfg}"
+    done
 fi
 
 # ── Pull image on normal install/run ─────────────────────────────────────────

@@ -12,6 +12,14 @@
         server: local
         container: open-webui
 
+- Media:
+    - Plex:
+        href: https://app.plex.tv/desktop/
+        description: Media Server
+        icon: https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/plex.png
+        server: local
+        container: plex
+
 - Interfaces:
     - Homepage:
         href: http://localhost:3001
@@ -19,10 +27,16 @@
         icon: mdi-view-grid-outline-#f59e0b
         server: local
         container: homepage
+    - Admin Panel:
+        href: https://localhost:9443
+        description: Admin Panel
+        icon: mdi-view-grid-outline-#f59e0b
+        server: local
+        container: portainer
 
 - Links:
     - GitHub:
-        href: https://github.com/
+        href: https://github.com/HungLo2020/
         description: Code hosting
         icon: si-github-#181717
     - YouTube:
