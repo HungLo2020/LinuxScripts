@@ -36,7 +36,7 @@ CONTAINER_NAME="automatic1111"
 IMAGE_NAME="automatic1111-webui"
 # Increment IMAGE_VERSION whenever the Dockerfile changes so stale cached
 # images are automatically detected and rebuilt.
-IMAGE_VERSION="2"
+IMAGE_VERSION="3"
 DATA_DIR="${HOME}/.automatic1111"
 PORT=7861
 SD_REPO_MIRROR="https://github.com/Jonel865/stable-diffusion-stability-ai.git"
@@ -264,15 +264,16 @@ if [[ "${ACTION}" == "run" && "${NEEDS_BUILD}" == "true" ]]; then
     trap 'rm -rf "${BUILD_CTX}"' EXIT
 
     cat > "${BUILD_CTX}/Dockerfile" << 'DOCKERFILE'
-FROM python:3.10.14-slim-bullseye
+FROM python:3.10-slim-bookworm
 
-LABEL version="2"
+LABEL version="3"
 
 ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN apt-get update -o Acquire::Retries=5 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 \
+    && apt-get install -y --no-install-recommends --fix-missing \
         git \
         wget \
         curl \
