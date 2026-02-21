@@ -196,6 +196,7 @@ JELLYFIN_PORT=8096
 RADARR_PORT=7878
 SONARR_PORT=8989
 JACKETT_PORT=9117
+FLARESOLVERR_PORT=8191
 QBITTORRENT_WEBUI_PORT=8080
 QBITTORRENT_TORRENT_PORT=6881
 EOF
@@ -222,6 +223,7 @@ start_stack() {
   log "Radarr:       http://localhost:7878"
   log "Sonarr:       http://localhost:8989"
   log "Jackett:      http://localhost:9117"
+  log "FlareSolverr: http://localhost:8191"
   log "qBittorrent:  http://localhost:8080"
 }
 
