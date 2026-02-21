@@ -34,6 +34,32 @@
         server: local
         container: portainer
 
+- Backend Services:
+    - Sonarr:
+        href: http://localhost:8080/
+        description: TV Show Management
+        icon: https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/sonarr.png
+        server: local
+        container: sonarr
+    - Radarr:
+        href: http://localhost:7878/
+        description: Movie Management
+        icon: https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/radarr.png
+        server: local
+        container: radarr
+    - qBittorrent:
+        href: http://localhost:8080/
+        description: Torrent Client
+        icon: https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/qbittorrent.png
+        server: local
+        container: qbittorrent
+    - Jackett:
+        href: http://localhost:9117/
+        description: Torrent Indexer
+        icon: https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/jackett.png
+        server: local
+        container: jackett
+
 - Links:
     - GitHub:
         href: https://github.com/HungLo2020/
