@@ -310,7 +310,7 @@ RUN mkdir -p \
 USER webui
 ENV HOME=/home/webui
 
-EXPOSE 7860
+EXPOSE 7861
 DOCKERFILE
 
     docker_exec build -t "${IMAGE_NAME}" "${BUILD_CTX}"
