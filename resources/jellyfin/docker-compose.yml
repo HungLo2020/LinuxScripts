@@ -50,6 +50,7 @@ services:
     volumes:
       - ${STACK_ROOT}/config/jellyfin:/config
       - ${MEDIA_PATH}:/media
+      - ${MUSIC_PATH}:/music
       - ${DOWNLOADS_PATH}:/downloads
     ports:
       - ${JELLYFIN_PORT}:8096
