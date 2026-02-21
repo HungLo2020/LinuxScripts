@@ -20,6 +20,8 @@ services:
       - ${QBITTORRENT_TORRENT_PORT}:${QBITTORRENT_TORRENT_PORT}/tcp
       - ${QBITTORRENT_TORRENT_PORT}:${QBITTORRENT_TORRENT_PORT}/udp
     restart: unless-stopped
+    networks:
+      - jellyfin_stack_net
 
   qbittorrent:
     image: lscr.io/linuxserver/qbittorrent:latest
@@ -52,6 +54,8 @@ services:
     ports:
       - ${JELLYFIN_PORT}:8096
     restart: unless-stopped
+    networks:
+      - jellyfin_stack_net
 
   radarr:
     image: lscr.io/linuxserver/radarr:latest
@@ -67,6 +71,8 @@ services:
     ports:
       - ${RADARR_PORT}:7878
     restart: unless-stopped
+    networks:
+      - jellyfin_stack_net
 
   sonarr:
     image: lscr.io/linuxserver/sonarr:latest
@@ -82,6 +88,8 @@ services:
     ports:
       - ${SONARR_PORT}:8989
     restart: unless-stopped
+    networks:
+      - jellyfin_stack_net
 
   jackett:
     image: lscr.io/linuxserver/jackett:latest
@@ -97,6 +105,10 @@ services:
     ports:
       - ${JACKETT_PORT}:9117
     restart: unless-stopped
+    networks:
+      jellyfin_stack_net:
+        aliases:
+          - jackett
 
   flaresolverr:
     image: ghcr.io/flaresolverr/flaresolverr:latest
@@ -110,3 +122,7 @@ services:
       - CAPTCHA_SOLVER=none
       - TZ=${TZ}
     restart: unless-stopped
+
+networks:
+  jellyfin_stack_net:
+    name: jellyfin_stack_net
