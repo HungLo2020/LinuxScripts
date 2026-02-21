@@ -38,7 +38,17 @@ fi
 log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*"; }
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-RESOURCE_DIR="${SCRIPT_DIR}/resources/jellyfin"
+REPO_ROOT="${SCRIPT_DIR}"
+while [[ "${REPO_ROOT}" != "/" && ! -d "${REPO_ROOT}/resources" ]]; do
+  REPO_ROOT="$(dirname "${REPO_ROOT}")"
+done
+
+if [[ ! -d "${REPO_ROOT}/resources" ]]; then
+  echo "Error: could not locate repository resources directory from ${SCRIPT_DIR}"
+  exit 1
+fi
+
+RESOURCE_DIR="${REPO_ROOT}/resources/jellyfin"
 COMPOSE_TEMPLATE="${RESOURCE_DIR}/docker-compose.yml"
 ENV_TEMPLATE="${RESOURCE_DIR}/.env.example"
 
