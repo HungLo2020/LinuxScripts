@@ -1,13 +1,15 @@
 #!/usr/bin/env bash
 # =============================================================================
-# run-automatic1111.sh
+# RunStableDiffusionContainer.sh
 #
 # Self-contained script to install and run AUTOMATIC1111 Stable Diffusion
 # WebUI as a Docker container with NO content filter.
 #
 # Usage:
-#   ./run-automatic1111.sh          Install (if needed) and start the UI
-#   ./run-automatic1111.sh -n       Stop the container and delete all files
+#   ./RunStableDiffusionContainer.sh          Install (if needed) and start the UI
+#   ./RunStableDiffusionContainer.sh -D       Stop container and delete all files
+#   ./RunStableDiffusionContainer.sh --off    Stop container without deleting files
+#   ./RunStableDiffusionContainer.sh --on     Start container only if already installed
 #
 # What this script does:
 #   - Installs Docker if it is not already present
@@ -23,7 +25,7 @@
 #                            formats can be loaded.  Only load model files from
 #                            sources you trust.
 #   --allow-code             Permits arbitrary Python execution inside the
-#                            prompt pipeline.  Do NOT expose port 7860 to an
+#                            prompt pipeline.  Do NOT expose port 7861 to an
 #                            untrusted network when this flag is active.
 # =============================================================================
 
@@ -36,7 +38,9 @@ IMAGE_NAME="automatic1111-webui"
 # images are automatically detected and rebuilt.
 IMAGE_VERSION="2"
 DATA_DIR="${HOME}/.automatic1111"
-PORT=7860
+PORT=7861
+SD_REPO_MIRROR="https://github.com/Jonel865/stable-diffusion-stability-ai.git"
+SD_REPO_COMMIT="cf1d67a6fd5ea1aa600c4df58e5b47da45f6bdbf"
 
 # DreamShaper 8 — publicly accessible on Hugging Face, no account required.
 MODEL_FILENAME="Dreamshaper_8.safetensors"
@@ -58,18 +62,68 @@ docker_exec() {
     fi
 }
 
-# ── -n flag: stop container and delete everything ─────────────────────────────
-if [[ "${1:-}" == "-n" ]]; then
-    log "=== Shutting down AUTOMATIC1111 and removing its files ==="
+ACTION="run"
+if [[ "$#" -gt 1 ]]; then
+    log "Error: too many arguments."
+    exit 1
+fi
 
-    # Determine whether sudo is needed before we can talk to Docker.
-    if ! docker info &>/dev/null; then
-        if sudo docker info &>/dev/null; then
-            DOCKER_USE_SUDO="true"
+if [[ "$#" -eq 1 ]]; then
+    case "$1" in
+        -D)
+            ACTION="delete"
+            ;;
+        --off)
+            ACTION="off"
+            ;;
+        --on)
+            ACTION="on"
+            ;;
+        *)
+            log "Error: unknown argument '$1'. Use -D, --off, or --on."
+            exit 1
+            ;;
+    esac
+fi
+
+# ── Install Docker if not present ─────────────────────────────────────────────
+if [[ "${ACTION}" == "run" ]] && ! command -v docker &>/dev/null; then
+    log "Docker not found. Installing via the official get.docker.com script..."
+    curl -fsSL https://get.docker.com | sudo sh
+    sudo usermod -aG docker "${USER}" || true
+    log "Docker installed."
+fi
+
+if ! command -v docker &>/dev/null; then
+    if [[ "${ACTION}" == "delete" ]]; then
+        log "Warning: Docker not found; skipping container/image removal."
+        if [[ -d "${DATA_DIR}" ]]; then
+            log "Removing data directory: ${DATA_DIR}"
+            rm -rf "${DATA_DIR}"
         else
-            log "Warning: cannot reach Docker daemon; skipping container/image removal."
+            log "Data directory does not exist."
         fi
+        log "=== Cleanup complete ==="
+        exit 0
     fi
+
+    log "Error: Docker is not installed."
+    exit 1
+fi
+
+# Resolve whether we need sudo to run docker commands.
+if ! docker info &>/dev/null; then
+    if sudo docker info &>/dev/null; then
+        DOCKER_USE_SUDO="true"
+        log "Using 'sudo docker' for this session (user not yet in docker group)."
+    else
+        log "Error: cannot connect to the Docker daemon. Is Docker running?"
+        exit 1
+    fi
+fi
+
+if [[ "${ACTION}" == "delete" ]]; then
+    log "=== Shutting down AUTOMATIC1111 and removing its files ==="
 
     if docker_exec ps -q --filter "name=^/${CONTAINER_NAME}$" 2>/dev/null | grep -q .; then
         log "Stopping container..."
@@ -103,36 +157,53 @@ if [[ "${1:-}" == "-n" ]]; then
     exit 0
 fi
 
-# ── Install Docker if not present ─────────────────────────────────────────────
-if ! command -v docker &>/dev/null; then
-    log "Docker not found. Installing via the official get.docker.com script..."
-    curl -fsSL https://get.docker.com | sudo sh
-    sudo usermod -aG docker "${USER}" || true
-    log "Docker installed."
+if [[ "${ACTION}" == "off" ]]; then
+    if docker_exec ps -q --filter "name=^/${CONTAINER_NAME}$" 2>/dev/null | grep -q .; then
+        log "Stopping container..."
+        docker_exec stop "${CONTAINER_NAME}" >/dev/null
+        log "Container stopped."
+    else
+        log "Container is not running."
+    fi
+    exit 0
 fi
 
-# Resolve whether we need sudo to run docker commands.
-if ! docker info &>/dev/null; then
-    if sudo docker info &>/dev/null; then
-        DOCKER_USE_SUDO="true"
-        log "Using 'sudo docker' for this session (user not yet in docker group)."
-    else
-        log "Error: cannot connect to the Docker daemon. Is Docker running?"
+if [[ "${ACTION}" == "on" ]]; then
+    if ! docker_exec images -q "${IMAGE_NAME}" 2>/dev/null | grep -q .; then
+        log "Error: AUTOMATIC1111 is not installed (image not found). Run without flags first."
         exit 1
+    fi
+
+    shopt -s nullglob
+    installed_models=(
+        "${DATA_DIR}/models/Stable-diffusion"/*.safetensors
+        "${DATA_DIR}/models/Stable-diffusion"/*.ckpt
+    )
+    shopt -u nullglob
+
+    if [[ "${#installed_models[@]}" -eq 0 ]]; then
+        log "Error: no installed model found in ${DATA_DIR}/models/Stable-diffusion."
+        exit 1
+    fi
+
+    if docker_exec ps -q --filter "name=^/${CONTAINER_NAME}$" 2>/dev/null | grep -q .; then
+        log "Container is already running."
+        exit 0
     fi
 fi
 
 # ── Create persistent data directories ───────────────────────────────────────
-mkdir -p \
-    "${DATA_DIR}/models/Stable-diffusion" \
-    "${DATA_DIR}/outputs" \
-    "${DATA_DIR}/venv" \
-    "${DATA_DIR}/extensions"
+if [[ "${ACTION}" == "run" ]]; then
+    mkdir -p \
+        "${DATA_DIR}/models/Stable-diffusion" \
+        "${DATA_DIR}/outputs" \
+        "${DATA_DIR}/extensions"
+fi
 
 # ── Download model (no login required) ───────────────────────────────────────
 MODEL_PATH="${DATA_DIR}/models/Stable-diffusion/${MODEL_FILENAME}"
 
-if [[ ! -f "${MODEL_PATH}" ]]; then
+if [[ "${ACTION}" == "run" && ! -f "${MODEL_PATH}" ]]; then
     log "Downloading model: ${MODEL_FILENAME}"
     log "This will take several minutes depending on your connection (file is ~2 GB)."
     PARTIAL="${MODEL_PATH}.partial"
@@ -163,27 +234,29 @@ if [[ ! -f "${MODEL_PATH}" ]]; then
 
     mv "${PARTIAL}" "${MODEL_PATH}"
     log "Model downloaded: ${MODEL_FILENAME}"
-else
+elif [[ "${ACTION}" == "run" ]]; then
     log "Model already present: ${MODEL_FILENAME}"
 fi
 
 # ── Build Docker image (rebuild when Dockerfile version changes) ──────────────
 NEEDS_BUILD="false"
-if ! docker_exec images -q "${IMAGE_NAME}" 2>/dev/null | grep -q .; then
-    NEEDS_BUILD="true"
-else
-    existing_version=$(docker_exec inspect --format '{{index .Config.Labels "version"}}' \
-        "${IMAGE_NAME}" 2>/dev/null || echo "")
-    if [[ "${existing_version}" != "${IMAGE_VERSION}" ]]; then
-        log "Docker image is outdated (version ${existing_version:-unknown} → ${IMAGE_VERSION}); rebuilding..."
-        docker_exec rmi "${IMAGE_NAME}" 2>/dev/null || true
+if [[ "${ACTION}" == "run" ]]; then
+    if ! docker_exec images -q "${IMAGE_NAME}" 2>/dev/null | grep -q .; then
         NEEDS_BUILD="true"
     else
-        log "Docker image already exists and is up to date: ${IMAGE_NAME}"
+        existing_version=$(docker_exec inspect --format '{{index .Config.Labels "version"}}' \
+            "${IMAGE_NAME}" 2>/dev/null || echo "")
+        if [[ "${existing_version}" != "${IMAGE_VERSION}" ]]; then
+            log "Docker image is outdated (version ${existing_version:-unknown} → ${IMAGE_VERSION}); rebuilding..."
+            docker_exec rmi "${IMAGE_NAME}" 2>/dev/null || true
+            NEEDS_BUILD="true"
+        else
+            log "Docker image already exists and is up to date: ${IMAGE_NAME}"
+        fi
     fi
 fi
 
-if [[ "${NEEDS_BUILD}" == "true" ]]; then
+if [[ "${ACTION}" == "run" && "${NEEDS_BUILD}" == "true" ]]; then
     log "Building Docker image — this is a one-time step that may take 10-20 minutes."
 
     BUILD_CTX=$(mktemp -d)
@@ -244,13 +317,6 @@ DOCKERFILE
     log "Docker image built successfully."
 fi
 
-# ── Remove any existing (stopped) container so we start clean ─────────────────
-if docker_exec ps -aq --filter "name=^/${CONTAINER_NAME}$" 2>/dev/null | grep -q .; then
-    log "Removing leftover container..."
-    docker_exec stop "${CONTAINER_NAME}" 2>/dev/null || true
-    docker_exec rm "${CONTAINER_NAME}"
-fi
-
 # ── GPU detection ─────────────────────────────────────────────────────────────
 USE_GPU="false"
 if command -v nvidia-smi &>/dev/null && nvidia-smi &>/dev/null 2>&1; then
@@ -292,17 +358,35 @@ if [[ "${HOST_UID}" == "0" ]]; then
     exit 1
 fi
 
+# Ensure the mounted venv cache is valid. webui.sh only creates the venv when
+# the directory is absent; an empty/broken directory causes activation failure.
+if [[ -d "${DATA_DIR}/venv" && ! -f "${DATA_DIR}/venv/bin/activate" ]]; then
+    log "Detected invalid cached venv; removing it so it can be recreated."
+    rm -rf "${DATA_DIR}/venv"
+fi
+
+if [[ ! -f "${DATA_DIR}/venv/bin/activate" ]]; then
+    log "Bootstrapping Python venv cache..."
+    mkdir -p "${DATA_DIR}/venv"
+    docker_exec run --rm \
+        --user "${HOST_UID}:${HOST_GID}" \
+        -v "${DATA_DIR}/venv:/app/venv" \
+        "${IMAGE_NAME}" \
+        python -m venv /app/venv
+fi
+
 # Use /tmp as HOME so that any UID works without needing /home/<user> inside
 # the container (the Dockerfile only created /home/webui for UID 1000).
 DOCKER_RUN_ARGS=(
     --name "${CONTAINER_NAME}"
-    --rm
     --user "${HOST_UID}:${HOST_GID}"
     -p "${PORT}:7860"
     -v "${DATA_DIR}/models/Stable-diffusion:/app/models/Stable-diffusion"
     -v "${DATA_DIR}/outputs:/app/outputs"
     -v "${DATA_DIR}/venv:/app/venv"
     -v "${DATA_DIR}/extensions:/app/extensions"
+    -e "STABLE_DIFFUSION_REPO=${SD_REPO_MIRROR}"
+    -e "STABLE_DIFFUSION_COMMIT_HASH=${SD_REPO_COMMIT}"
     -e "COMMANDLINE_ARGS=${WEBUI_ARGS}"
     -e HOME=/tmp
 )
@@ -312,6 +396,37 @@ if [[ "${USE_GPU}" == "true" ]]; then
 fi
 
 # ── Launch ────────────────────────────────────────────────────────────────────
+if [[ "${ACTION}" == "on" ]]; then
+    if docker_exec ps -aq --filter "name=^/${CONTAINER_NAME}$" 2>/dev/null | grep -q .; then
+        log "Starting existing container..."
+        docker_exec start "${CONTAINER_NAME}" >/dev/null
+    else
+        log "No existing container found; creating it from installed image..."
+        docker_exec run -d "${DOCKER_RUN_ARGS[@]}" "${IMAGE_NAME}" bash webui.sh >/dev/null
+    fi
+
+    for _ in {1..60}; do
+        if curl -fsS "http://127.0.0.1:${PORT}/" >/dev/null 2>&1; then
+            log "Container started at: http://localhost:${PORT}"
+            exit 0
+        fi
+        sleep 1
+    done
+
+    log "Container started, but readiness check timed out. Check logs with: sudo docker logs -f ${CONTAINER_NAME}"
+    exit 0
+fi
+
+if docker_exec ps -q --filter "name=^/${CONTAINER_NAME}$" 2>/dev/null | grep -q .; then
+    log "Container is already running."
+    exit 0
+fi
+
+if docker_exec ps -aq --filter "name=^/${CONTAINER_NAME}$" 2>/dev/null | grep -q .; then
+    log "Removing old stopped container before fresh run..."
+    docker_exec rm "${CONTAINER_NAME}" >/dev/null
+fi
+
 log "=== Starting AUTOMATIC1111 Stable Diffusion WebUI (NO filter) ==="
 log "  Web UI : http://localhost:${PORT}"
 log "  API    : http://localhost:${PORT}/docs"
@@ -321,7 +436,21 @@ log "into the mounted venv — this can take 10-30 min. Subsequent starts"
 log "reuse the cached venv and are much faster."
 log ""
 log "To stop  : press Ctrl+C"
-log "To remove: $(basename "$0") -n"
+log "To remove: $(basename "$0") -D"
 log ""
+log "After 'Model loaded...' there may be little/no new log output; WebUI is usually idle and waiting for requests."
+
+(
+    for _ in {1..180}; do
+        if curl -fsS "http://127.0.0.1:${PORT}/" >/dev/null 2>&1; then
+            log "WebUI is ready at: http://localhost:${PORT}"
+            exit 0
+        fi
+        sleep 1
+    done
+    log "Warning: WebUI readiness check timed out after 180s."
+) &
+READINESS_PID=$!
 
 docker_exec run "${DOCKER_RUN_ARGS[@]}" "${IMAGE_NAME}" bash webui.sh
+wait $READINESS_PID 2>/dev/null || true
