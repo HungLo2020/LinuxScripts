@@ -272,8 +272,17 @@ ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 
-RUN apt-get update -o Acquire::Retries=5 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 \
-    && apt-get install -y --no-install-recommends --fix-missing \
+RUN set -eux; \
+    for i in 1 2 3 4 5; do \
+        apt-get update -o Acquire::Retries=5 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 && \
+        apt-cache show git >/dev/null 2>&1 && \
+        apt-cache show curl >/dev/null 2>&1 && break; \
+        echo "apt index fetch incomplete (attempt ${i}/5), retrying..."; \
+        sleep 5; \
+    done; \
+    apt-cache show git >/dev/null 2>&1; \
+    apt-cache show curl >/dev/null 2>&1; \
+    apt-get install -y --no-install-recommends --fix-missing \
         git \
         wget \
         curl \
@@ -283,8 +292,8 @@ RUN apt-get update -o Acquire::Retries=5 -o Acquire::http::Timeout=30 -o Acquire
         libxrender1 \
         libxext6 \
         libgomp1 \
-        ffmpeg \
-    && rm -rf /var/lib/apt/lists/*
+        ffmpeg; \
+    rm -rf /var/lib/apt/lists/*
 
 RUN git clone --depth=1 https://github.com/AUTOMATIC1111/stable-diffusion-webui /app
 
@@ -314,7 +323,7 @@ ENV HOME=/home/webui
 EXPOSE 7861
 DOCKERFILE
 
-    docker_exec build -t "${IMAGE_NAME}" "${BUILD_CTX}"
+    docker_exec build --network=host -t "${IMAGE_NAME}" "${BUILD_CTX}"
     log "Docker image built successfully."
 fi
 
