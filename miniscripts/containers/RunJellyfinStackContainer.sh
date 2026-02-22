@@ -174,6 +174,67 @@ prompt_absolute_existing_dir() {
   done
 }
 
+bitwarden_status() {
+  local status_json
+  local parsed
+
+  status_json="$(bw status 2>/dev/null || true)"
+  parsed="$(printf '%s' "$status_json" | sed -n 's/.*"status"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')"
+
+  if [[ -z "$parsed" ]]; then
+    echo "unknown"
+  else
+    echo "$parsed"
+  fi
+}
+
+try_bitwarden_nordvpn_credentials() {
+  local item_name="${BITWARDEN_NORDVPN_ITEM:-NordVPN}"
+  local status
+  local session
+  local bw_user
+  local bw_pass
+
+  if ! command -v bw >/dev/null 2>&1; then
+    log "Bitwarden CLI (bw) not found; using manual NordVPN credential entry."
+    return 1
+  fi
+
+  log "Attempting Bitwarden lookup for NordVPN credentials (item: ${item_name})..."
+  status="$(bitwarden_status)"
+
+  if [[ "$status" == "unauthenticated" || "$status" == "unknown" ]]; then
+    log "Bitwarden CLI is not authenticated. Attempting 'bw login'..."
+    if ! bw login </dev/tty >/dev/tty 2>&1; then
+      log "Bitwarden login failed; falling back to manual NordVPN credential entry."
+      return 1
+    fi
+    status="$(bitwarden_status)"
+  fi
+
+  if [[ "$status" == "locked" ]]; then
+    log "Bitwarden vault is locked. Attempting 'bw unlock'..."
+    session="$(bw unlock --raw </dev/tty 2>/dev/null || true)"
+    if [[ -z "$session" ]]; then
+      log "Bitwarden unlock failed; falling back to manual NordVPN credential entry."
+      return 1
+    fi
+    export BW_SESSION="$session"
+  fi
+
+  bw_user="$(bw get username "$item_name" 2>/dev/null || true)"
+  bw_pass="$(bw get password "$item_name" 2>/dev/null || true)"
+
+  if [[ -z "$bw_user" || -z "$bw_pass" ]]; then
+    log "Bitwarden item missing username/password or item not found; falling back to manual entry."
+    return 1
+  fi
+
+  NORDVPN_USER_FROM_BW="$bw_user"
+  NORDVPN_PASS_FROM_BW="$bw_pass"
+  return 0
+}
+
 write_env_file() {
   local media_path="$1"
   local music_path="$2"
@@ -339,8 +400,14 @@ case "${ACTION}" in
     fi
     mkdir -p "${downloads_path}"
 
-    nord_user="$(prompt_non_empty 'NordVPN username (service credentials): ')"
-    nord_pass="$(prompt_non_empty 'NordVPN password (service credentials): ')"
+    if try_bitwarden_nordvpn_credentials; then
+      nord_user="$NORDVPN_USER_FROM_BW"
+      nord_pass="$NORDVPN_PASS_FROM_BW"
+      log "Using NordVPN credentials from Bitwarden."
+    else
+      nord_user="$(prompt_non_empty 'NordVPN username (service credentials): ')"
+      nord_pass="$(prompt_non_empty 'NordVPN password (service credentials): ')"
+    fi
 
     read -r -p "NordVPN country (Enter for United States): " nord_country
     if [[ -z "${nord_country}" ]]; then

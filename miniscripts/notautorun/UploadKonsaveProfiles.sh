@@ -18,15 +18,83 @@ contains_exact() {
   return 1
 }
 
+bitwarden_status() {
+  local status_json
+  local parsed
+
+  status_json="$(bw status 2>/dev/null || true)"
+  parsed="$(printf '%s' "$status_json" | sed -n 's/.*"status"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')"
+
+  if [[ -z "$parsed" ]]; then
+    echo "unknown"
+  else
+    echo "$parsed"
+  fi
+}
+
+ensure_gh_authenticated() {
+  local bw_item_name="${BITWARDEN_GITHUB_ITEM:-github.com}"
+  local bw_state
+  local bw_session
+  local github_token
+
+  if gh auth status >/dev/null 2>&1; then
+    return 0
+  fi
+
+  echo "gh is not authenticated. Attempting Bitwarden token login (item: ${bw_item_name})..."
+
+  if command -v bw >/dev/null 2>&1; then
+    bw_state="$(bitwarden_status)"
+
+    if [[ "$bw_state" == "unauthenticated" || "$bw_state" == "unknown" ]]; then
+      if ! bw login </dev/tty >/dev/tty 2>&1; then
+        echo "Bitwarden login failed. Falling back to manual gh login."
+      fi
+      bw_state="$(bitwarden_status)"
+    fi
+
+    if [[ "$bw_state" == "locked" ]]; then
+      bw_session="$(bw unlock --raw </dev/tty 2>/dev/null || true)"
+      if [[ -n "$bw_session" ]]; then
+        export BW_SESSION="$bw_session"
+        bw_state="$(bitwarden_status)"
+      fi
+    fi
+
+    if [[ "$bw_state" == "unlocked" ]]; then
+      github_token="$(bw get password "$bw_item_name" 2>/dev/null || true)"
+      if [[ -n "$github_token" ]]; then
+        if printf '%s\n' "$github_token" | gh auth login --hostname github.com --with-token >/dev/null 2>&1; then
+          if gh auth status >/dev/null 2>&1; then
+            echo "Authenticated gh using Bitwarden token."
+            return 0
+          fi
+        fi
+        echo "Bitwarden token login to gh failed. Falling back to manual gh login."
+      else
+        echo "Bitwarden item '${bw_item_name}' missing password/token. Falling back to manual gh login."
+      fi
+    else
+      echo "Bitwarden is unavailable/locked/unauthenticated. Falling back to manual gh login."
+    fi
+  else
+    echo "Bitwarden CLI not installed. Falling back to manual gh login."
+  fi
+
+  gh auth login
+  if ! gh auth status >/dev/null 2>&1; then
+    echo "Error: gh authentication failed."
+    exit 1
+  fi
+}
+
 if ! command -v gh >/dev/null 2>&1; then
   echo "Error: GitHub CLI (gh) is not installed."
   exit 1
 fi
 
-if ! gh auth status >/dev/null 2>&1; then
-  echo "Error: gh is not authenticated. Run: gh auth login"
-  exit 1
-fi
+ensure_gh_authenticated
 
 if [[ ! -d "$PROFILES_DIR" ]]; then
   echo "Error: KDE profiles directory not found: $PROFILES_DIR"

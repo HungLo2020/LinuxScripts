@@ -5,6 +5,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SETUPLINUX_SCRIPTS_DIR="$SCRIPT_DIR/miniscripts/setuplinux"
 VALIDATION_SCRIPT="$SCRIPT_DIR/miniscripts/notautorun/SetupValidation.sh"
+BITWARDEN_LOGIN_SCRIPT="$SCRIPT_DIR/miniscripts/notautorun/BitwardenSetupAndLogin.sh"
 SCRIPT_ORDER_FILE="$SCRIPT_DIR/resources/script-order.txt"
 
 # This array stores script paths chosen during the question phase.
@@ -24,6 +25,19 @@ ask_yes_no() {
       *) echo "Please enter y or n." ;;
     esac
   done
+}
+
+contains_exact() {
+  local needle="$1"
+  shift
+  local item
+
+  for item in "$@"; do
+    if [[ "$item" == "$needle" ]]; then
+      return 0
+    fi
+  done
+  return 1
 }
 
 script_matches_order_rule() {
@@ -181,6 +195,17 @@ else
 fi
 
 apply_script_order
+
+if [[ ! -f "$BITWARDEN_LOGIN_SCRIPT" ]]; then
+  echo "Bitwarden setup/login script not found: $BITWARDEN_LOGIN_SCRIPT"
+  exit 1
+fi
+
+echo "Running Bitwarden setup/login step..."
+if ! bash "$BITWARDEN_LOGIN_SCRIPT"; then
+  echo "Bitwarden setup/login failed. Exiting."
+  exit 1
+fi
 
 # Run apt update once at the start to ensure we have the latest package info after script selection
 echo "Updating package lists..."
