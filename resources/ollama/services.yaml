@@ -89,6 +89,5 @@
 - Actions:
     - Update Homepage:
         href: http://localhost:8787/update-homepage
-        target: _self
         description: Pull latest + restart Homepage
         icon: mdi-refresh-circle-#3b82f6

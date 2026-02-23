@@ -6,6 +6,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 UPDATE_SCRIPT="$SCRIPT_DIR/UpdateHomepage.sh"
 PORT="${ACTIONS_SERVER_PORT:-8787}"
 HOST="${ACTIONS_SERVER_HOST:-0.0.0.0}"
+HOMEPAGE_REDIRECT_URL="${HOMEPAGE_REDIRECT_URL:-http://localhost:3001}"
+ACTION_LOG_FILE="${ACTION_LOG_FILE:-/tmp/linuxscripts-update-homepage.log}"
 
 if [[ ! -f "$UPDATE_SCRIPT" ]]; then
   echo "Error: update script not found: $UPDATE_SCRIPT"
@@ -15,15 +17,20 @@ fi
 export UPDATE_SCRIPT
 export ACTIONS_SERVER_PORT="$PORT"
 export ACTIONS_SERVER_HOST="$HOST"
+export HOMEPAGE_REDIRECT_URL
+export ACTION_LOG_FILE
 
 python3 - <<'PY'
 import os
 import subprocess
 from http.server import BaseHTTPRequestHandler, HTTPServer
+from urllib.parse import parse_qs, urlparse
 
 update_script = os.environ["UPDATE_SCRIPT"]
 host = os.environ.get("ACTIONS_SERVER_HOST", "0.0.0.0")
 port = int(os.environ.get("ACTIONS_SERVER_PORT", "8787"))
+homepage_redirect_url = os.environ.get("HOMEPAGE_REDIRECT_URL", "http://localhost:3001")
+action_log_file = os.environ.get("ACTION_LOG_FILE", "/tmp/linuxscripts-update-homepage.log")
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -36,29 +43,49 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body_bytes)
 
     def do_GET(self):
-        if self.path.rstrip("/") != "/update-homepage":
+        parsed = urlparse(self.path)
+        path = parsed.path.rstrip("/")
+
+        if path == "/update-homepage/status":
+            self._show_status()
+            return
+
+        if path != "/update-homepage":
             self._respond(404, "Not found\n")
             return
 
-        result = subprocess.run(
-            ["bash", update_script],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
+        query = parse_qs(parsed.query)
+        next_url = query.get("next", [""])[0].strip()
+        redirect_url = next_url or self.headers.get("Referer", "").strip() or homepage_redirect_url
 
-        if result.returncode == 0:
-            output = (result.stdout or "").strip()
-            if output:
-                self._respond(200, f"Update started/completed successfully.\n\n{output}\n")
-            else:
-                self._respond(200, "Update started/completed successfully.\n")
+        with open(action_log_file, "a", encoding="utf-8") as log_fp:
+            log_fp.write("\n=== Triggered update-homepage action ===\n")
+            process = subprocess.Popen(
+                ["bash", update_script],
+                stdout=log_fp,
+                stderr=log_fp,
+                text=True,
+            )
+            log_fp.write(f"PID: {process.pid}\n")
+
+        self.send_response(302)
+        self.send_header("Location", redirect_url)
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+
+    def _show_status(self):
+        if not os.path.exists(action_log_file):
+            self._respond(200, "No action log yet.\n")
             return
 
-        stderr = (result.stderr or "").strip()
-        stdout = (result.stdout or "").strip()
-        merged = "\n".join(part for part in [stdout, stderr] if part)
-        self._respond(500, f"Update failed (exit {result.returncode}).\n\n{merged}\n")
+        try:
+            with open(action_log_file, "r", encoding="utf-8") as fp:
+                content = fp.read()
+        except OSError as exc:
+            self._respond(500, f"Unable to read log file: {exc}\n")
+            return
+
+        self._respond(200, content if content.endswith("\n") else content + "\n")
 
     def log_message(self, format: str, *args):
         return
