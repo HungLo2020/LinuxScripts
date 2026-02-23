@@ -3,7 +3,7 @@
 set -euo pipefail
 
 packages=(
-  "glances"
+  "btop"
 )
 
 echo "Installing default packages..."
