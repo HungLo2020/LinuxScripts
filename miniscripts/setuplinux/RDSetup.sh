@@ -5,13 +5,170 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 INSTALL_TAILSCALE_SCRIPT="$SCRIPT_DIR/../notautorun/RDSetup-Headless.sh"
 
-TARGET_USER="${SUDO_USER:-$USER}"
+TARGET_USER="${SUDO_USER:-$(id -un)}"
 TARGET_HOME="$(getent passwd "$TARGET_USER" | cut -d: -f6)"
+
+# Bitwarden item name that holds the RustDesk permanent password.
+# Override by setting this env var before running the script.
+BITWARDEN_RUSTDESK_ITEM="${BITWARDEN_RUSTDESK_ITEM:-PCPassword}"
 
 if [[ -z "$TARGET_HOME" || ! -d "$TARGET_HOME" ]]; then
   echo "Error: Could not determine home directory for user '$TARGET_USER'."
   exit 1
 fi
+
+# ── Helpers ───────────────────────────────────────────────────────────────────
+
+run_as_target_user() {
+  if [[ "$(id -un)" == "$TARGET_USER" ]]; then
+    "$@"
+  else
+    sudo -H -u "$TARGET_USER" "$@"
+  fi
+}
+
+bitwarden_status() {
+  local status_json
+  local parsed
+
+  status_json="$(bw status 2>/dev/null || true)"
+  parsed="$(printf '%s' "$status_json" | sed -n 's/.*"status"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')"
+
+  if [[ -z "$parsed" ]]; then
+    echo "unknown"
+  else
+    echo "$parsed"
+  fi
+}
+
+# Sets RUSTDESK_PERMANENT_PASSWORD from the Bitwarden vault.
+# Returns 0 on success, 1 if Bitwarden is unavailable or the item is missing.
+try_bitwarden_rustdesk_password() {
+  if ! command -v bw >/dev/null 2>&1; then
+    echo "Bitwarden CLI (bw) not found; falling back to manual password entry."
+    return 1
+  fi
+
+  echo "Attempting Bitwarden lookup for RustDesk password (item: ${BITWARDEN_RUSTDESK_ITEM})..."
+  local status
+  local session
+
+  status="$(bitwarden_status)"
+
+  if [[ "$status" == "unauthenticated" || "$status" == "unknown" ]]; then
+    echo "Bitwarden is not authenticated. Attempting 'bw login'..."
+    if ! bw login </dev/tty >/dev/tty 2>&1; then
+      echo "Bitwarden login failed; falling back to manual password entry."
+      return 1
+    fi
+    status="$(bitwarden_status)"
+  fi
+
+  if [[ "$status" == "locked" ]]; then
+    echo "Bitwarden vault is locked. Attempting 'bw unlock'..."
+    session="$(bw unlock --raw </dev/tty 2>/dev/null || true)"
+    if [[ -z "$session" ]]; then
+      echo "Bitwarden unlock failed; falling back to manual password entry."
+      return 1
+    fi
+    export BW_SESSION="$session"
+  fi
+
+  RUSTDESK_PERMANENT_PASSWORD="$(bw get password "$BITWARDEN_RUSTDESK_ITEM" 2>/dev/null || true)"
+
+  if [[ -z "$RUSTDESK_PERMANENT_PASSWORD" ]]; then
+    echo "Bitwarden item '${BITWARDEN_RUSTDESK_ITEM}' not found or has no password; falling back to manual entry."
+    return 1
+  fi
+
+  return 0
+}
+
+# Configures RustDesk for unattended access (permanent password) and direct IP.
+configure_rustdesk() {
+  local rd_password="$1"
+  local rd_config_dir="$TARGET_HOME/.config/rustdesk"
+  local rd_config_file="$rd_config_dir/RustDesk2.toml"
+
+  echo "Configuring RustDesk for user '$TARGET_USER'..."
+  run_as_target_user mkdir -p "$rd_config_dir"
+
+  # ── Permanent password (enables unattended / no-confirm access) ───────────
+  echo "Setting RustDesk permanent password (unattended access)..."
+  # Note: the password is visible in the process list while this command runs;
+  # this is an inherent limitation of the 'rustdesk --password' CLI API.
+  if run_as_target_user rustdesk --password "$rd_password" 2>/dev/null; then
+    echo "Permanent password set via RustDesk CLI."
+  else
+    echo "Warning: 'rustdesk --password' failed; writing password directly to config."
+    # Use python3 (already required by this script) to write the TOML entry
+    # safely — the password is passed via sys.argv so no shell escaping is needed.
+    # RustDesk will hash the plaintext value on the next service start.
+    run_as_target_user python3 - "$rd_config_file" "$rd_password" <<'PY'
+import sys, re
+
+config_file, password = sys.argv[1], sys.argv[2]
+try:
+    content = open(config_file).read()
+except FileNotFoundError:
+    content = ""
+
+entry = 'permanent-password = "{}"'.format(password.replace('\\', '\\\\').replace('"', '\\"'))
+if re.search(r'^\[options\]', content, re.MULTILINE):
+    if 'permanent-password' not in content:
+        content = re.sub(r'^(\[options\])', r'\1\n' + entry, content, flags=re.MULTILINE)
+    else:
+        content = re.sub(r'permanent-password\s*=\s*"[^"]*"', entry, content)
+else:
+    content += '\n[options]\n{}\n'.format(entry)
+
+with open(config_file, 'w') as f:
+    f.write(content)
+PY
+  fi
+
+  # ── Direct IP access (direct-server = "Y" in RustDesk2.toml) ─────────────
+  echo "Enabling direct IP access in RustDesk config..."
+  run_as_target_user python3 - "$rd_config_file" <<'PY'
+import sys, re, os
+
+config_file = sys.argv[1]
+os.makedirs(os.path.dirname(config_file), exist_ok=True)
+try:
+    content = open(config_file).read()
+except FileNotFoundError:
+    content = ""
+
+entry = 'direct-server = "Y"'
+if re.search(r'^\[options\]', content, re.MULTILINE):
+    if 'direct-server' not in content:
+        content = re.sub(r'^(\[options\])', r'\1\n' + entry, content, flags=re.MULTILINE)
+    else:
+        content = re.sub(r'direct-server\s*=\s*"[^"]*"', entry, content)
+else:
+    content += '\n[options]\n{}\n'.format(entry)
+
+with open(config_file, 'w') as f:
+    f.write(content)
+
+print('Direct IP access enabled in: {}'.format(config_file))
+PY
+
+  # ── Restart service to apply config changes ───────────────────────────────
+  if systemctl is-enabled --quiet rustdesk 2>/dev/null; then
+    echo "Restarting RustDesk service to apply configuration..."
+    if [[ "$EUID" -eq 0 ]]; then
+      systemctl restart rustdesk
+    else
+      sudo systemctl restart rustdesk
+    fi
+    echo "RustDesk service restarted."
+  else
+    echo "Note: RustDesk service not currently enabled; config will apply on next start."
+  fi
+}
+
+# ── Pre-flight check ──────────────────────────────────────────────────────────
 
 if [[ ! -f "$INSTALL_TAILSCALE_SCRIPT" ]]; then
   echo "Error: required script not found: $INSTALL_TAILSCALE_SCRIPT"
@@ -20,6 +177,8 @@ fi
 
 echo "Running shared headless setup installer..."
 bash "$INSTALL_TAILSCALE_SCRIPT"
+
+# ── Download and install RustDesk ─────────────────────────────────────────────
 
 echo "Downloading latest RustDesk release..."
 RUSTDESK_DOWNLOAD_DIR="$TARGET_HOME/Downloads/RustDesk"
@@ -65,6 +224,26 @@ echo "Cleaning up RustDesk installer files..."
 rm -f "$RUSTDESK_FILE"
 rmdir "$RUSTDESK_DOWNLOAD_DIR" 2>/dev/null || true
 
-echo "RustDesk installed and cleanup complete."
+echo "RustDesk installed."
 
-echo "Setup complete. RustDesk installed and headless setup handled by RDSetup-Headless.sh."
+# ── Configure unattended access and direct IP ─────────────────────────────────
+
+RUSTDESK_PERMANENT_PASSWORD=""
+
+if try_bitwarden_rustdesk_password; then
+  echo "Using RustDesk permanent password from Bitwarden (item: ${BITWARDEN_RUSTDESK_ITEM})."
+else
+  while true; do
+    read -r -s -p "Enter RustDesk permanent password for unattended access: " \
+      RUSTDESK_PERMANENT_PASSWORD </dev/tty
+    echo
+    if [[ -n "$RUSTDESK_PERMANENT_PASSWORD" ]]; then
+      break
+    fi
+    echo "Password cannot be empty."
+  done
+fi
+
+configure_rustdesk "$RUSTDESK_PERMANENT_PASSWORD"
+
+echo "Setup complete. RustDesk installed with unattended access and direct IP access enabled."
