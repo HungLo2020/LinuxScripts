@@ -122,7 +122,7 @@ All container scripts follow the same pattern:
 - Deploys Homepage dashboard container
 - Data path: `~/.homepage-dashboard`
 - Port: `3001`
-- Copies template configs from `resources/ollama/` on each run
+- Copies template configs from `resources/homepage/` on each run
 - Requires active Tailscale for `run`/`--on`
 - Rewrites `localhost/127.0.0.1/[::1]` URLs in service/widget/bookmark configs to active Tailscale IPv4
 - Sets `HOMEPAGE_ALLOWED_HOSTS` dynamically and recreates container if allowlist changes
@@ -192,7 +192,7 @@ bash miniscripts/notautorun/DownloadKonsaveProfiles.sh
 	Optional execution priority rules for `SetupLinux.sh` (`[first]` and `[last]`).
 - `resources/variety.conf`  
 	Default Variety configuration copied by `InstallVariety.sh`.
-- `resources/ollama/*.yaml`  
+- `resources/homepage/*.yaml`  
 	Homepage config templates (`settings`, `services`, `widgets`, `bookmarks`, `docker`).
 - `resources/jellyfin/docker-compose.yml` + `.env.example`  
 	Media stack topology and variable template.
