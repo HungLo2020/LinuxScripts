@@ -39,6 +39,12 @@
         icon: mdi-view-grid-outline-#f59e0b
         server: local
         container: portainer
+    - Uptime Kuma:
+        href: http://100.79.57.82:3002
+        description: Service Monitor
+        icon: https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/uptime-kuma.png
+        server: local
+        container: uptime-kuma
 
 - Backend Services:
     - Sonarr:
