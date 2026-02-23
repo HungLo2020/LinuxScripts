@@ -4,6 +4,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+BW_MASTER_PASSWORD_FILE="$REPO_ROOT/.bw_master_password"
 PROFILES_DIR="$REPO_ROOT/KDEProfiles"
 
 contains_exact() {
@@ -55,7 +56,14 @@ ensure_gh_authenticated() {
     fi
 
     if [[ "$bw_state" == "locked" ]]; then
-      bw_session="$(bw unlock --raw </dev/tty 2>/dev/null || true)"
+      if [[ -f "$BW_MASTER_PASSWORD_FILE" ]]; then
+        IFS= read -r BW_MASTER_PASSWORD < "$BW_MASTER_PASSWORD_FILE"
+        export BW_MASTER_PASSWORD
+        bw_session="$(bw unlock --passwordenv BW_MASTER_PASSWORD --nointeraction --raw 2>/dev/null || true)"
+        unset BW_MASTER_PASSWORD
+      else
+        bw_session="$(bw unlock --raw </dev/tty 2>/dev/null || true)"
+      fi
       if [[ -n "$bw_session" ]]; then
         export BW_SESSION="$bw_session"
         bw_state="$(bitwarden_status)"
