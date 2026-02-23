@@ -57,7 +57,7 @@ print_row "$SELF_HOST" "$SELF_IP" "true"
 while IFS=$'\t' read -r hostname ip online; do
     print_row "$hostname" "$ip" "$online"
 done < <(echo "$STATUS_JSON" | jq -r '
-    .Peers // {} | to_entries[] |
+    .Peer // {} | to_entries[] |
     [.value.HostName, (.value.TailscaleIPs[0] // "N/A"), (if .value.Online then "true" else "false" end)] |
     @tsv
 ')
