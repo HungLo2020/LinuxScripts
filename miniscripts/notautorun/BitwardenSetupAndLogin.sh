@@ -2,6 +2,10 @@
 
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+BW_MASTER_PASSWORD_FILE="$PROJECT_ROOT/.bw_master_password"
+
 BITWARDEN_SNAP_NAME="bitwarden"
 
 ask_yes_no() {
@@ -64,6 +68,25 @@ if command -v bw >/dev/null 2>&1; then
   done
 
   echo "Bitwarden login complete (status: $status)."
+
+  # ── Save master password for non-interactive vault unlock ─────────────────
+  echo "The master password is needed so that later scripts can unlock the"
+  echo "vault non-interactively. It will be stored at:"
+  echo "  $BW_MASTER_PASSWORD_FILE"
+  echo "(This file is chmod 600 and is excluded from git.)"
+  bw_setup_master_pw=""
+  while [[ -z "$bw_setup_master_pw" ]]; do
+    read -r -s -p "Enter your Bitwarden master password: " bw_setup_master_pw </dev/tty
+    echo
+    if [[ -z "$bw_setup_master_pw" ]]; then
+      echo "Password cannot be empty."
+    fi
+  done
+  (umask 077; printf '%s' "$bw_setup_master_pw" > "$BW_MASTER_PASSWORD_FILE") \
+    || { echo "Error: failed to save master password to $BW_MASTER_PASSWORD_FILE"; exit 1; }
+  unset bw_setup_master_pw
+  echo "Master password saved to: $BW_MASTER_PASSWORD_FILE"
+
   exit 0
 fi
 
