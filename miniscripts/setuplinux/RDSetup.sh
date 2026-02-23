@@ -2,27 +2,24 @@
 
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+INSTALL_TAILSCALE_SCRIPT="$SCRIPT_DIR/../notautorun/RDSetup-Headless.sh"
+
 TARGET_USER="${SUDO_USER:-$USER}"
 TARGET_HOME="$(getent passwd "$TARGET_USER" | cut -d: -f6)"
-
-# Install curl
-sudo apt update
-sudo apt install -y curl
 
 if [[ -z "$TARGET_HOME" || ! -d "$TARGET_HOME" ]]; then
   echo "Error: Could not determine home directory for user '$TARGET_USER'."
   exit 1
 fi
 
-echo "Installing Tailscale..."
-if [[ "$EUID" -eq 0 ]]; then
-  curl -fsSL https://tailscale.com/install.sh | sh
-else
-  curl -fsSL https://tailscale.com/install.sh | sudo sh
+if [[ ! -f "$INSTALL_TAILSCALE_SCRIPT" ]]; then
+  echo "Error: required script not found: $INSTALL_TAILSCALE_SCRIPT"
+  exit 1
 fi
 
-echo "Bringing Tailscale up..."
-sudo tailscale up
+echo "Running shared headless setup installer..."
+bash "$INSTALL_TAILSCALE_SCRIPT"
 
 echo "Downloading latest RustDesk release..."
 RUSTDESK_DOWNLOAD_DIR="$TARGET_HOME/Downloads/RustDesk"
@@ -70,10 +67,4 @@ rmdir "$RUSTDESK_DOWNLOAD_DIR" 2>/dev/null || true
 
 echo "RustDesk installed and cleanup complete."
 
-echo "Installing OpenSSH Server..."
-sudo apt update
-sudo apt install -y openssh-server
-echo "Enabling and starting sshd service..."
-sudo systemctl enable ssh
-sudo systemctl start ssh
-echo "Setup complete. Tailscale, RustDesk, and OpenSSH Server are installed and running."
+echo "Setup complete. RustDesk installed and headless setup handled by RDSetup-Headless.sh."
