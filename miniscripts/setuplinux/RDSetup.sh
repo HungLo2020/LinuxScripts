@@ -10,7 +10,7 @@ TARGET_HOME="$(getent passwd "$TARGET_USER" | cut -d: -f6)"
 
 # Bitwarden item name that holds the RustDesk permanent password.
 # Override by setting this env var before running the script.
-BITWARDEN_RUSTDESK_ITEM="${BITWARDEN_RUSTDESK_ITEM:-RustDesk}"
+BITWARDEN_RUSTDESK_ITEM="${BITWARDEN_RUSTDESK_ITEM:-PCPassword}"
 
 if [[ -z "$TARGET_HOME" || ! -d "$TARGET_HOME" ]]; then
   echo "Error: Could not determine home directory for user '$TARGET_USER'."
