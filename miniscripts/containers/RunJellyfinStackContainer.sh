@@ -6,6 +6,7 @@
 #   - Jellyfin
 #   - Radarr
 #   - Sonarr
+#   - Seerr
 #   - Jackett
 #   - qBittorrent (behind NordVPN via Gluetun kill-switch)
 #
@@ -268,6 +269,7 @@ NORDVPN_COUNTRY=${nord_country}
 JELLYFIN_PORT=8096
 RADARR_PORT=7878
 SONARR_PORT=8989
+SEERR_PORT=5055
 JACKETT_PORT=9117
 FLARESOLVERR_PORT=8191
 QBITTORRENT_WEBUI_PORT=8080
@@ -311,6 +313,7 @@ start_stack() {
     "${STACK_ROOT}/config/jellyfin" \
     "${STACK_ROOT}/config/radarr" \
     "${STACK_ROOT}/config/sonarr" \
+    "${STACK_ROOT}/config/seerr" \
     "${STACK_ROOT}/config/jackett" \
     "${STACK_ROOT}/config/qbittorrent"
 
@@ -321,6 +324,7 @@ start_stack() {
   log "Jellyfin:     http://localhost:8096"
   log "Radarr:       http://localhost:7878"
   log "Sonarr:       http://localhost:8989"
+  log "Seerr:        http://localhost:5055"
   log "Jackett:      http://localhost:9117"
   log "For Radarr/Sonarr indexer URL use: http://jackett:9117"
   log "FlareSolverr: internal to Jackett at http://localhost:8191"

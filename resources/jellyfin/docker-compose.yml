@@ -92,6 +92,24 @@ services:
     networks:
       - jellyfin_stack_net
 
+  seerr:
+    image: seerr/seerr:latest
+    container_name: seerr
+    depends_on:
+      - jellyfin
+      - radarr
+      - sonarr
+    environment:
+      - TZ=${TZ}
+      - LOG_LEVEL=info
+    volumes:
+      - ${STACK_ROOT}/config/seerr:/app/config
+    ports:
+      - ${SEERR_PORT}:5055
+    restart: unless-stopped
+    networks:
+      - jellyfin_stack_net
+
   jackett:
     image: lscr.io/linuxserver/jackett:latest
     container_name: jackett

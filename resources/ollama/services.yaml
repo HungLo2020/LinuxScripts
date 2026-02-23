@@ -25,6 +25,12 @@
         icon: https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/jellyfin.png
         server: local
         container: jellyfin
+    - Seerr
+        href: http://localhost:5055/
+        description: Media Request
+        icon: https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/seerr.png
+        server: local
+        container: seerr
 
 - Interfaces:
     - Homepage:
