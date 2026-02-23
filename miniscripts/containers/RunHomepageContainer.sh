@@ -36,11 +36,11 @@ if [[ ! -d "${REPO_ROOT}/resources" ]]; then
     exit 1
 fi
 
-SETTINGS_TEMPLATE="${REPO_ROOT}/resources/ollama/settings.yaml"
-SERVICES_TEMPLATE="${REPO_ROOT}/resources/ollama/services.yaml"
-WIDGETS_TEMPLATE="${REPO_ROOT}/resources/ollama/widgets.yaml"
-BOOKMARKS_TEMPLATE="${REPO_ROOT}/resources/ollama/bookmarks.yaml"
-DOCKER_TEMPLATE="${REPO_ROOT}/resources/ollama/docker.yaml"
+SETTINGS_TEMPLATE="${REPO_ROOT}/resources/homepage/settings.yaml"
+SERVICES_TEMPLATE="${REPO_ROOT}/resources/homepage/services.yaml"
+WIDGETS_TEMPLATE="${REPO_ROOT}/resources/homepage/widgets.yaml"
+BOOKMARKS_TEMPLATE="${REPO_ROOT}/resources/homepage/bookmarks.yaml"
+DOCKER_TEMPLATE="${REPO_ROOT}/resources/homepage/docker.yaml"
 TAILSCALE_IP=""
 ALLOWED_HOSTS=""
 
