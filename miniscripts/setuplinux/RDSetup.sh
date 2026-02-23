@@ -100,6 +100,23 @@ configure_rustdesk() {
   fi
   local rd_config_file="$rd_config_dir/RustDesk2.toml"
 
+  # ── Stop service before modifying config ─────────────────────────────────
+  local service_was_active=false
+  if systemctl is-active --quiet rustdesk 2>/dev/null; then
+    service_was_active=true
+    echo "RustDesk service is running; stopping it before applying configuration..."
+    if [[ "$EUID" -eq 0 ]]; then
+      if ! systemctl stop rustdesk; then
+        echo "Warning: failed to stop RustDesk service; configuration may not be applied correctly."
+      fi
+    else
+      if ! sudo systemctl stop rustdesk; then
+        echo "Warning: failed to stop RustDesk service; configuration may not be applied correctly."
+      fi
+    fi
+    echo "RustDesk service stopped."
+  fi
+
   echo "Configuring RustDesk (config dir: $rd_config_dir)..."
   mkdir -p "$rd_config_dir"
 
@@ -165,7 +182,7 @@ print('Direct IP access enabled in: {}'.format(config_file))
 PY
 
   # ── Restart service to apply config changes ───────────────────────────────
-  if systemctl is-enabled --quiet rustdesk 2>/dev/null; then
+  if [[ "$service_was_active" == true ]] || systemctl is-enabled --quiet rustdesk 2>/dev/null; then
     echo "Restarting RustDesk service to apply configuration..."
     if [[ "$EUID" -eq 0 ]]; then
       systemctl restart rustdesk
