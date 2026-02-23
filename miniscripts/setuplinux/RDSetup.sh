@@ -4,6 +4,8 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 INSTALL_TAILSCALE_SCRIPT="$SCRIPT_DIR/../notautorun/RDSetup-Headless.sh"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+BW_MASTER_PASSWORD_FILE="$PROJECT_ROOT/.bw_master_password"
 
 TARGET_USER="${SUDO_USER:-$(id -un)}"
 TARGET_HOME="$(getent passwd "$TARGET_USER" | cut -d: -f6)"
@@ -66,7 +68,16 @@ try_bitwarden_rustdesk_password() {
 
   if [[ "$status" == "locked" ]]; then
     echo "Bitwarden vault is locked. Attempting 'bw unlock'..."
-    session="$(bw unlock --raw --nointeraction </dev/tty 2>/dev/null || true)"
+    if [[ -f "$BW_MASTER_PASSWORD_FILE" ]]; then
+      echo "Using master password file for non-interactive unlock..."
+      IFS= read -r BW_MASTER_PASSWORD < "$BW_MASTER_PASSWORD_FILE"
+      export BW_MASTER_PASSWORD
+      session="$(bw unlock --passwordenv BW_MASTER_PASSWORD --nointeraction --raw 2>/dev/null || true)"
+      unset BW_MASTER_PASSWORD
+    else
+      echo "Master password file not found. Run miniscripts/notautorun/BitwardenSetupAndLogin.sh to set it up initially."
+      session="$(bw unlock --raw </dev/tty 2>/dev/null || true)"
+    fi
     if [[ -z "$session" ]]; then
       echo "Bitwarden unlock failed; falling back to manual password entry."
       return 1
