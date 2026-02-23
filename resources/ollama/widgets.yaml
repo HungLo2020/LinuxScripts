@@ -13,3 +13,11 @@
     timezone: America/Los_Angeles
     units: imperial
     cache: 5
+- uptimekuma:
+    label: Uptime Kuma
+    url: http://100.79.57.82:3001
+- resources:
+    cpu: true
+    memory: true
+    disk: true
+    network: true
