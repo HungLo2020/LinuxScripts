@@ -87,24 +87,34 @@ try_bitwarden_rustdesk_password() {
 # Configures RustDesk for unattended access (permanent password) and direct IP.
 configure_rustdesk() {
   local rd_password="$1"
-  local rd_config_dir="$TARGET_HOME/.config/rustdesk"
+
+  # The RustDesk system service runs as root (the unit file has no User= directive).
+  # When this script is executed as root (e.g. via sudo), write the config to
+  # root's XDG config directory so the service actually picks it up.
+  # When run as a regular user (no sudo), fall back to that user's home.
+  local rd_config_dir
+  if [[ "$EUID" -eq 0 ]]; then
+    rd_config_dir="/root/.config/rustdesk"
+  else
+    rd_config_dir="$TARGET_HOME/.config/rustdesk"
+  fi
   local rd_config_file="$rd_config_dir/RustDesk2.toml"
 
-  echo "Configuring RustDesk for user '$TARGET_USER'..."
-  run_as_target_user mkdir -p "$rd_config_dir"
+  echo "Configuring RustDesk (config dir: $rd_config_dir)..."
+  mkdir -p "$rd_config_dir"
 
   # ── Permanent password (enables unattended / no-confirm access) ───────────
   echo "Setting RustDesk permanent password (unattended access)..."
   # Note: the password is visible in the process list while this command runs;
   # this is an inherent limitation of the 'rustdesk --password' CLI API.
-  if run_as_target_user rustdesk --password "$rd_password" 2>/dev/null; then
+  if rustdesk --password "$rd_password" 2>/dev/null; then
     echo "Permanent password set via RustDesk CLI."
   else
     echo "Warning: 'rustdesk --password' failed; writing password directly to config."
     # Use python3 (already required by this script) to write the TOML entry
     # safely — the password is passed via sys.argv so no shell escaping is needed.
     # RustDesk will hash the plaintext value on the next service start.
-    run_as_target_user python3 - "$rd_config_file" "$rd_password" <<'PY'
+    python3 - "$rd_config_file" "$rd_password" <<'PY'
 import sys, re
 
 config_file, password = sys.argv[1], sys.argv[2]
@@ -129,7 +139,7 @@ PY
 
   # ── Direct IP access (direct-server = "Y" in RustDesk2.toml) ─────────────
   echo "Enabling direct IP access in RustDesk config..."
-  run_as_target_user python3 - "$rd_config_file" <<'PY'
+  python3 - "$rd_config_file" <<'PY'
 import sys, re, os
 
 config_file = sys.argv[1]
