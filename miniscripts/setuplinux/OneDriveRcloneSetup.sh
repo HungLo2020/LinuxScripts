@@ -88,17 +88,37 @@ if [[ "$(id -u)" -eq 0 ]]; then
 else
   current_crontab="$(crontab -l 2>/dev/null || true)"
 fi
-desired_crontab="$(printf "%s\n" "${DESIRED_CRON_ENTRIES[@]}")"
 
-if [[ "$(printf "%s\n" "$current_crontab" | normalize_crontab)" == "$(printf "%s\n" "$desired_crontab" | normalize_crontab)" ]]; then
-  echo "Crontab already matches desired entries. No changes made."
-else
-  if [[ "$(id -u)" -eq 0 ]]; then
-    printf "%s\n" "${DESIRED_CRON_ENTRIES[@]}" | crontab -u "$TARGET_USER" -
-  else
-    printf "%s\n" "${DESIRED_CRON_ENTRIES[@]}" | crontab -
+missing_entries=()
+for entry in "${DESIRED_CRON_ENTRIES[@]}"; do
+  normalized_entry="$(printf "%s" "$entry" | normalize_crontab)"
+  if ! printf "%s\n" "$current_crontab" | normalize_crontab | grep -qxF "$normalized_entry"; then
+    missing_entries+=("$entry")
   fi
-  echo "Crontab updated. Only desired entries are present now."
+done
+
+if [[ ${#missing_entries[@]} -eq 0 ]]; then
+  echo "All cron entries already present. No changes made."
+else
+  new_crontab="$current_crontab"
+  for entry in "${missing_entries[@]}"; do
+    if [[ -n "$new_crontab" ]]; then
+      new_crontab+=$'\n'"$entry"
+    else
+      new_crontab="$entry"
+    fi
+  done
+
+  if [[ "$(id -u)" -eq 0 ]]; then
+    printf "%s\n" "$new_crontab" | crontab -u "$TARGET_USER" -
+  else
+    printf "%s\n" "$new_crontab" | crontab -
+  fi
+  if [[ ${#missing_entries[@]} -eq 1 ]]; then
+    echo "Added 1 new cron entry."
+  else
+    echo "Added ${#missing_entries[@]} new cron entries."
+  fi
 fi
 
 echo "OneDrive rclone setup complete."
