@@ -66,7 +66,7 @@ try_bitwarden_rustdesk_password() {
 
   if [[ "$status" == "locked" ]]; then
     echo "Bitwarden vault is locked. Attempting 'bw unlock'..."
-    session="$(bw unlock --raw </dev/tty 2>/dev/null || true)"
+    session="$(bw unlock --raw --nointeraction </dev/tty 2>/dev/null || true)"
     if [[ -z "$session" ]]; then
       echo "Bitwarden unlock failed; falling back to manual password entry."
       return 1
