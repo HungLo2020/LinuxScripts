@@ -100,22 +100,16 @@ configure_rustdesk() {
   fi
   local rd_config_file="$rd_config_dir/RustDesk2.toml"
 
-  # ── Stop service before modifying config ─────────────────────────────────
-  local service_was_active=false
-  if systemctl is-active --quiet rustdesk 2>/dev/null; then
-    service_was_active=true
-    echo "RustDesk service is running; stopping it before applying configuration..."
-    if [[ "$EUID" -eq 0 ]]; then
-      if ! systemctl stop rustdesk; then
-        echo "Warning: failed to stop RustDesk service; configuration may not be applied correctly."
-      fi
-    else
-      if ! sudo systemctl stop rustdesk; then
-        echo "Warning: failed to stop RustDesk service; configuration may not be applied correctly."
-      fi
-    fi
-    echo "RustDesk service stopped."
+  # ── Stop and disable service before modifying config ─────────────────────
+  echo "Stopping and disabling RustDesk service before configuration..."
+  if [[ "$EUID" -eq 0 ]]; then
+    systemctl stop rustdesk 2>/dev/null || true
+    systemctl disable rustdesk 2>/dev/null || true
+  else
+    sudo systemctl stop rustdesk 2>/dev/null || true
+    sudo systemctl disable rustdesk 2>/dev/null || true
   fi
+  echo "RustDesk service stopped and disabled."
 
   echo "Configuring RustDesk (config dir: $rd_config_dir)..."
   mkdir -p "$rd_config_dir"
@@ -124,7 +118,14 @@ configure_rustdesk() {
   echo "Setting RustDesk permanent password (unattended access)..."
   # Note: the password is visible in the process list while this command runs;
   # this is an inherent limitation of the 'rustdesk --password' CLI API.
-  if rustdesk --password "$rd_password" 2>/dev/null; then
+  # The CLI writes the password as plain text; RustDesk encrypts it on first start.
+  local rd_pw_set=false
+  if [[ "$EUID" -eq 0 ]]; then
+    rustdesk --password "$rd_password" 2>/dev/null && rd_pw_set=true
+  else
+    sudo rustdesk --password "$rd_password" 2>/dev/null && rd_pw_set=true
+  fi
+  if [[ "$rd_pw_set" == true ]]; then
     echo "Permanent password set via RustDesk CLI."
   else
     echo "Warning: 'rustdesk --password' failed; writing password directly to config."
@@ -181,18 +182,16 @@ with open(config_file, 'w') as f:
 print('Direct IP access enabled in: {}'.format(config_file))
 PY
 
-  # ── Restart service to apply config changes ───────────────────────────────
-  if [[ "$service_was_active" == true ]] || systemctl is-enabled --quiet rustdesk 2>/dev/null; then
-    echo "Restarting RustDesk service to apply configuration..."
-    if [[ "$EUID" -eq 0 ]]; then
-      systemctl restart rustdesk
-    else
-      sudo systemctl restart rustdesk
-    fi
-    echo "RustDesk service restarted."
+  # ── Enable and start service to apply config changes ─────────────────────
+  echo "Enabling and starting RustDesk service..."
+  if [[ "$EUID" -eq 0 ]]; then
+    systemctl enable rustdesk
+    systemctl start rustdesk
   else
-    echo "Note: RustDesk service not currently enabled; config will apply on next start."
+    sudo systemctl enable rustdesk
+    sudo systemctl start rustdesk
   fi
+  echo "RustDesk service enabled and started."
 }
 
 # ── Pre-flight check ──────────────────────────────────────────────────────────
