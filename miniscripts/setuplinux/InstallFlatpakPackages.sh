@@ -3,9 +3,10 @@
 set -euo pipefail
 
 flatpak_packages=(
-  "bottles"
-  "flatseal"
-  "MissionCenter"
+  "com.usebottles.bottles"
+  "com.github.tchx84.Flatseal"
+  "io.missioncenter.MissionCenter"
+  "com.discordapp.Discord"
 )
 
 echo "Installing flatpak..."
@@ -16,11 +17,8 @@ sudo flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub
 
 echo "Installing Flatpak packages..."
 for package in "${flatpak_packages[@]}"; do
-  sudo flatpak install -y "$package"
+  sudo flatpak install -y flathub "$package"
   echo "Installed $package"
 done
-
-echo "Installing Discord flatpak..."
-sudo flatpak install -y flathub com.discordapp.Discord
 
 echo "Done installing Flatpak packages."
