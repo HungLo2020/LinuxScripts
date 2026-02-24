@@ -14,3 +14,5 @@ if [[ "$EUID" -eq 0 ]]; then
 else
   curl -fsSL https://tailscale.com/install.sh | sudo sh
 fi
+
+sudo tailscale up
