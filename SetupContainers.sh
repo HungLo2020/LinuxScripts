@@ -91,16 +91,24 @@ for script_path in "${scripts[@]}"; do
 done
 echo
 
+end_prompting="false"
+
 for script_path in "${scripts[@]}"; do
   script_name="${script_path#"$CONTAINER_SCRIPTS_DIR"/}"
 
+  if [[ "$end_prompting" == "true" ]]; then
+    echo "Skipping ${script_name} (--end requested)."
+    continue
+  fi
+
   while true; do
-    read -r -p "${script_name}: enter one of [--on/--off/--delete/-I/--skip/end]: " action
+    read -r -p "${script_name}: enter one of [--on/--off/--delete/-I/--skip/--end]: " action
 
     case "$action" in
-      end)
-        echo "Exiting SetupContainers with no further actions."
-        exit 0
+      --end)
+        echo "Stopping prompts. Remaining scripts will be skipped."
+        end_prompting="true"
+        break
         ;;
       --skip)
         echo "Skipping ${script_name}."
@@ -131,7 +139,7 @@ for script_path in "${scripts[@]}"; do
         break
         ;;
       *)
-        echo "Invalid input. Use: --on, --off, --delete, -I, --skip, or end."
+        echo "Invalid input. Use: --on, --off, --delete, -I, --skip, or --end."
         ;;
     esac
   done
