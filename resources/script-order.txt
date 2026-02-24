@@ -5,5 +5,4 @@
 AddRepos.sh
 
 [last]
-FavoritesAndTaskbarConfig.sh
 RemoveUnwantedPackages.sh
