@@ -5,66 +5,158 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CONTAINER_SCRIPTS_DIR="$SCRIPT_DIR/miniscripts/containers"
 
-SELECTED_SCRIPTS=()
-DISCOVERED_SCRIPTS=()
+BLUE='\033[34m'
+GREEN='\033[32m'
+RED='\033[31m'
+GRAY='\033[90m'
+RESET='\033[0m'
 
-ask_yes_no() {
-  local prompt="$1"
-  local answer
+status_color() {
+  local status_lc
+  status_lc="$(echo "$1" | tr '[:upper:]' '[:lower:]')"
 
-  while true; do
-    read -r -p "$prompt (y/n): " answer
-    case "$answer" in
-      [Yy]) return 0 ;;
-      [Nn]) return 1 ;;
-      *) echo "Please enter y or n." ;;
-    esac
+  if [[ "$status_lc" == running* || "$status_lc" == up* ]]; then
+    printf '%s' "$GREEN"
+  elif [[ "$status_lc" == exited* || "$status_lc" == created* || "$status_lc" == paused* ]]; then
+    printf '%s' "$GRAY"
+  elif [[ "$status_lc" == dead* || "$status_lc" == restarting* || "$status_lc" == *"error"* || "$status_lc" == *"fail"* ]]; then
+    printf '%s' "$RED"
+  else
+    printf '%s' "$GRAY"
+  fi
+}
+
+print_container_table() {
+  echo "=== System Containers ==="
+
+  if ! command -v docker >/dev/null 2>&1; then
+    echo "docker is not installed; cannot list containers."
+    echo
+    return 0
+  fi
+
+  local docker_cmd=(docker)
+  if ! docker info >/dev/null 2>&1; then
+    if sudo docker info >/dev/null 2>&1; then
+      docker_cmd=(sudo docker)
+    else
+      echo "Cannot connect to Docker daemon; cannot list containers."
+      echo
+      return 0
+    fi
+  fi
+
+  mapfile -t container_rows < <("${docker_cmd[@]}" ps -a --format '{{.Names}}|{{.Status}}')
+
+  if [[ ${#container_rows[@]} -eq 0 ]]; then
+    echo "No containers found."
+    echo
+    return 0
+  fi
+
+  printf "%-40s %s\n" "NAME" "STATUS"
+  for row in "${container_rows[@]}"; do
+    local name status color
+    name="${row%%|*}"
+    status="${row#*|}"
+    color="$(status_color "$status")"
+    printf "%b%-40s%b %b%s%b\n" "$BLUE" "$name" "$RESET" "$color" "$status" "$RESET"
   done
+  echo
 }
 
 if [[ ! -d "$CONTAINER_SCRIPTS_DIR" ]]; then
   echo "No container scripts directory found at: $CONTAINER_SCRIPTS_DIR"
-  echo "Container setup complete."
   exit 0
 fi
 
-mapfile -t DISCOVERED_SCRIPTS < <(find "$CONTAINER_SCRIPTS_DIR" -type f -name "*.sh" | sort)
+mapfile -t scripts < <(find "$CONTAINER_SCRIPTS_DIR" -maxdepth 1 -type f -name '*.sh' | sort)
+selected_scripts=()
+selected_flags=()
 
-if [[ ${#DISCOVERED_SCRIPTS[@]} -eq 0 ]]; then
+if [[ ${#scripts[@]} -eq 0 ]]; then
+  print_container_table
   echo "No container scripts found in: $CONTAINER_SCRIPTS_DIR"
-  echo "Container setup complete."
   exit 0
 fi
 
-# ---------------------------
-# Question Phase (prompts only)
-# ---------------------------
-for script_path in "${DISCOVERED_SCRIPTS[@]}"; do
-  relative_script="${script_path#"$CONTAINER_SCRIPTS_DIR"/}"
+print_container_table
 
-  if ask_yes_no "Run $relative_script?"; then
-    SELECTED_SCRIPTS+=("$script_path")
-  fi
+echo "=== Container Scripts ==="
+echo "Note: flags entered here are delegated to each individual container script."
+echo "Use -I to run the script with no flags (install/default behavior)."
+echo "No container script will run until all scripts have been prompted."
+for script_path in "${scripts[@]}"; do
+  echo "- ${script_path#"$CONTAINER_SCRIPTS_DIR"/}"
+done
+echo
+
+for script_path in "${scripts[@]}"; do
+  script_name="${script_path#"$CONTAINER_SCRIPTS_DIR"/}"
+
+  while true; do
+    read -r -p "${script_name}: enter one of [--on/--off/--delete/-I/--skip/end]: " action
+
+    case "$action" in
+      end)
+        echo "Exiting SetupContainers with no further actions."
+        exit 0
+        ;;
+      --skip)
+        echo "Skipping ${script_name}."
+        break
+        ;;
+      --on)
+        selected_scripts+=("$script_path")
+        selected_flags+=("--on")
+        echo "Queued ${script_name} --on"
+        break
+        ;;
+      --off)
+        selected_scripts+=("$script_path")
+        selected_flags+=("--off")
+        echo "Queued ${script_name} --off"
+        break
+        ;;
+      --delete)
+        selected_scripts+=("$script_path")
+        selected_flags+=("-D")
+        echo "Queued ${script_name} --delete"
+        break
+        ;;
+      -I)
+        selected_scripts+=("$script_path")
+        selected_flags+=("")
+        echo "Queued ${script_name} -I (run with no flags)"
+        break
+        ;;
+      *)
+        echo "Invalid input. Use: --on, --off, --delete, -I, --skip, or end."
+        ;;
+    esac
+  done
 done
 
-# ---------------------------
-# Run Phase (execute selection)
-# ---------------------------
-if [[ ${#SELECTED_SCRIPTS[@]} -eq 0 ]]; then
-  echo "No scripts selected."
+echo
+echo "=== Execution Phase ==="
+if [[ ${#selected_scripts[@]} -eq 0 ]]; then
+  echo "No actions queued. Nothing to run."
   echo "Container setup complete."
   exit 0
 fi
 
-echo "Running selected container scripts..."
-for script_path in "${SELECTED_SCRIPTS[@]}"; do
-  if [[ ! -f "$script_path" ]]; then
-    echo "Skipping missing script: $script_path"
-    continue
-  fi
+for i in "${!selected_scripts[@]}"; do
+  script_path="${selected_scripts[$i]}"
+  run_flag="${selected_flags[$i]}"
+  script_name="${script_path#"$CONTAINER_SCRIPTS_DIR"/}"
 
-  echo "Running: $(basename "$script_path")"
-  bash "$script_path"
+  if [[ -z "$run_flag" ]]; then
+    echo "Running ${script_name} (no flags / install mode)"
+    bash "$script_path"
+  else
+    echo "Running ${script_name} ${run_flag}"
+    bash "$script_path" "$run_flag"
+  fi
 done
 
 echo "Container setup complete."
