@@ -91,7 +91,7 @@
         href: https://www.reddit.com/
         description: Community
         icon: si-reddit-#ff4500
-    - DuckDNS:
-        href: https://www.duckdns.org/
+    - Cloudflare:
+        href: https://dash.cloudflare.com/
         description: Dynamic DNS
-        icon: https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/duckdns.png
+        icon: https://cdn.jvr.net/gh/homarr-labs/dashboard-icons/png/cloudflare.png
