@@ -3,6 +3,7 @@
 
 [first]
 AddRepos.sh
+SetupSMBMount.sh
 
 [last]
 RemoveUnwantedPackages.sh
