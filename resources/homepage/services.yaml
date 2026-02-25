@@ -46,7 +46,7 @@
         server: local
         container: portainer
     - Uptime Kuma:
-        href: http://100.79.57.82:3002
+        href: http://100.85.155.22:3002
         description: Service Monitor
         icon: https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/uptime-kuma.png
         server: local
