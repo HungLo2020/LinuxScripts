@@ -297,6 +297,48 @@ derive_db_dir_from_external() {
     echo "${normalized}/DB"
 }
 
+normalize_path() {
+    local path="$1"
+    echo "${path%/}"
+}
+
+current_db_mount_source() {
+    if ! container_exists "${DB_CONTAINER_NAME}"; then
+        return 1
+    fi
+
+    docker_exec inspect \
+        --format '{{range .Mounts}}{{if eq .Destination "/var/lib/mysql"}}{{.Source}}{{end}}{{end}}' \
+        "${DB_CONTAINER_NAME}" 2>/dev/null
+}
+
+ensure_db_mount_target() {
+    local expected_db_dir="$1"
+    local current_mount expected_norm current_norm
+
+    current_mount="$(current_db_mount_source || true)"
+    if [[ -z "${current_mount}" ]]; then
+        return 0
+    fi
+
+    expected_norm="$(normalize_path "${expected_db_dir}")"
+    current_norm="$(normalize_path "${current_mount}")"
+
+    if [[ "${current_norm}" == "${expected_norm}" ]]; then
+        return 0
+    fi
+
+    log "DB container mount mismatch detected."
+    log "Expected: ${expected_norm}"
+    log "Current:  ${current_norm}"
+    log "Recreating DB container with expected mount path..."
+
+    compose_stack_exec stop >/dev/null || true
+    if container_exists "${DB_CONTAINER_NAME}"; then
+        docker_exec rm "${DB_CONTAINER_NAME}" >/dev/null || true
+    fi
+}
+
 migrate_db_dir_if_needed() {
     local target_db_dir="$1"
     local configured_db_dir legacy_candidate source_db_dir=""
@@ -500,6 +542,13 @@ fi
 if [[ "${ACTION}" == "on" ]] && container_running "${NEXTCLOUD_CONTAINER_NAME}" && container_running "${DB_CONTAINER_NAME}"; then
     log "${STACK_NAME} is already running at http://localhost:${PORT}"
     exit 0
+fi
+
+if [[ "${ACTION}" == "run" ]]; then
+    db_dir="$(read_env_value "NEXTCLOUD_DB_DIR" || true)"
+    if [[ -n "${db_dir}" ]]; then
+        ensure_db_mount_target "${db_dir}"
+    fi
 fi
 
 start_stack
