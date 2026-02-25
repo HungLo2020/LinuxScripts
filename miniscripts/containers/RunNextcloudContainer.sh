@@ -94,6 +94,17 @@ ensure_dir_for_user() {
     sudo chown "${USER}:${USER}" "${path}"
 }
 
+ensure_dir_exists() {
+    local path="$1"
+
+    if mkdir -p "${path}" 2>/dev/null; then
+        return 0
+    fi
+
+    log "No write access to create ${path}; trying with sudo..."
+    sudo mkdir -p "${path}"
+}
+
 ensure_docker() {
     if ! command -v docker >/dev/null 2>&1; then
         if [[ "${ACTION}" != "run" ]]; then
@@ -228,7 +239,7 @@ services:
       - MYSQL_USER=${MYSQL_USER}
       - MYSQL_PASSWORD=${MYSQL_PASSWORD}
     volumes:
-        - ${NEXTCLOUD_DB_DIR}:/var/lib/mysql
+            - ${NEXTCLOUD_DB_DIR}:/var/lib/mysql
 
   redis:
         image: redis:7-alpine
@@ -293,7 +304,7 @@ migrate_db_dir_if_needed() {
     configured_db_dir="$(read_env_value "NEXTCLOUD_DB_DIR" || true)"
     legacy_candidate="${LEGACY_DB_DIR}"
 
-    ensure_dir_for_user "${target_db_dir}"
+    ensure_dir_exists "${target_db_dir}"
 
     if [[ -n "${configured_db_dir}" && "${configured_db_dir}" != "${target_db_dir}" && -d "${configured_db_dir}" ]]; then
         source_db_dir="${configured_db_dir}"
@@ -475,7 +486,7 @@ if [[ "${ACTION}" == "run" ]]; then
 
     db_dir="$(derive_db_dir_from_external "${external_dir}")"
     migrate_db_dir_if_needed "${db_dir}"
-    ensure_dir_for_user "${db_dir}"
+    ensure_dir_exists "${db_dir}"
 
     write_env_file "${external_dir}" "${db_dir}"
     write_compose_file
