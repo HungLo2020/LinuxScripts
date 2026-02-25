@@ -12,8 +12,9 @@
 #
 # Notes:
 #   - Nextcloud UI is exposed on http://localhost:8082
-#   - External user data directory is prompted on first run and persisted
-#   - Nextcloud app/config and DB files are stored in ~/.nextcloud
+#   - External data directory is prompted on first run and persisted
+#   - DB path is default/fixed at ~/.nextcloud/db
+#   - Compose template source: resources/nextcloud/docker-compose.yml
 # =============================================================================
 
 set -euo pipefail
@@ -30,10 +31,23 @@ REDIS_IMAGE="redis:7-alpine"
 
 BASE_DATA_DIR="${HOME}/.nextcloud"
 NEXTCLOUD_APP_DIR="${BASE_DATA_DIR}/app"
-LEGACY_DB_DIR="${BASE_DATA_DIR}/db"
+DB_DIR="${BASE_DATA_DIR}/db"
 ENV_FILE="${BASE_DATA_DIR}/.env"
 COMPOSE_FILE="${BASE_DATA_DIR}/docker-compose.yml"
 PORT=8082
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="${SCRIPT_DIR}"
+while [[ "${REPO_ROOT}" != "/" && ! -d "${REPO_ROOT}/resources" ]]; do
+    REPO_ROOT="$(dirname "${REPO_ROOT}")"
+done
+
+if [[ ! -d "${REPO_ROOT}/resources" ]]; then
+    echo "Error: could not locate repository resources directory from ${SCRIPT_DIR}"
+    exit 1
+fi
+
+COMPOSE_TEMPLATE="${REPO_ROOT}/resources/nextcloud/docker-compose.yml"
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*"; }
@@ -92,17 +106,6 @@ ensure_dir_for_user() {
     log "No write access to create ${path}; trying with sudo..."
     sudo mkdir -p "${path}"
     sudo chown "${USER}:${USER}" "${path}"
-}
-
-ensure_dir_exists() {
-    local path="$1"
-
-    if mkdir -p "${path}" 2>/dev/null; then
-        return 0
-    fi
-
-    log "No write access to create ${path}; trying with sudo..."
-    sudo mkdir -p "${path}"
 }
 
 ensure_docker() {
@@ -174,15 +177,6 @@ prompt_external_data_dir() {
             fi
         fi
 
-        local test_dir="${path}/.nextcloud-write-test-$$"
-        if mkdir -p "${test_dir}" 2>/dev/null; then
-            rmdir "${test_dir}" || true
-        else
-            echo "Directory is not writable by the current user: ${path}"
-            echo "Fix permissions and try again."
-            continue
-        fi
-
         echo "${path}"
         return 0
     done
@@ -198,7 +192,6 @@ read_env_value() {
 
 write_env_file() {
     local external_data_dir="$1"
-    local db_dir="$2"
     local db_root_password db_password redis_password
 
     db_root_password="$(read_env_value "MYSQL_ROOT_PASSWORD" || true)"
@@ -213,8 +206,8 @@ write_env_file() {
 NEXTCLOUD_PORT=${PORT}
 NEXTCLOUD_APP_DIR=${NEXTCLOUD_APP_DIR}
 NEXTCLOUD_EXTERNAL_DATA_DIR=${external_data_dir}
-NEXTCLOUD_DB_DIR=${db_dir}
 NEXTCLOUD_TRUSTED_DOMAINS=localhost 127.0.0.1
+DB_DIR=${DB_DIR}
 
 MYSQL_DATABASE=nextcloud
 MYSQL_USER=nextcloud
@@ -225,174 +218,26 @@ REDIS_PASSWORD=${redis_password}
 EOF
 }
 
-write_compose_file() {
-        cat >"${COMPOSE_FILE}" <<'EOF'
-services:
-    db:
-        image: mariadb:11
-        container_name: nextcloud-db
-        restart: unless-stopped
-        command: --transaction-isolation=READ-COMMITTED --binlog-format=ROW
-        environment:
-            - MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD}
-            - MYSQL_DATABASE=${MYSQL_DATABASE}
-            - MYSQL_USER=${MYSQL_USER}
-            - MYSQL_PASSWORD=${MYSQL_PASSWORD}
-        volumes:
-            - ${NEXTCLOUD_DB_DIR}:/var/lib/mysql
+sync_compose_template() {
+    if [[ ! -f "${COMPOSE_TEMPLATE}" ]]; then
+        log "Error: missing compose template: ${COMPOSE_TEMPLATE}"
+        exit 1
+    fi
 
-    redis:
-        image: redis:7-alpine
-        container_name: nextcloud-redis
-        restart: unless-stopped
-        command: redis-server --requirepass ${REDIS_PASSWORD}
-
-    app:
-        image: nextcloud:latest
-        container_name: nextcloud-app
-        restart: unless-stopped
-        depends_on:
-            - db
-            - redis
-        ports:
-            - ${NEXTCLOUD_PORT}:80
-        environment:
-            - MYSQL_HOST=db
-            - MYSQL_DATABASE=${MYSQL_DATABASE}
-            - MYSQL_USER=${MYSQL_USER}
-            - MYSQL_PASSWORD=${MYSQL_PASSWORD}
-            - REDIS_HOST=redis
-            - REDIS_HOST_PASSWORD=${REDIS_PASSWORD}
-            - NEXTCLOUD_TRUSTED_DOMAINS=${NEXTCLOUD_TRUSTED_DOMAINS}
-        volumes:
-            - ${NEXTCLOUD_APP_DIR}:/var/www/html
-            - ${NEXTCLOUD_EXTERNAL_DATA_DIR}:/var/www/html/data
-EOF
+    cp "${COMPOSE_TEMPLATE}" "${COMPOSE_FILE}"
 }
 
 stack_present() {
-    [[ -f "${ENV_FILE}" && -f "${COMPOSE_FILE}" && -d "${NEXTCLOUD_APP_DIR}" ]]
-}
-
-compose_stack_exec() {
-    local compat_db_dir
-    compat_db_dir="$(read_env_value "NEXTCLOUD_DB_DIR" || true)"
-    [[ -n "${compat_db_dir}" ]] || compat_db_dir="${LEGACY_DB_DIR}"
-
-    export NEXTCLOUD_IMAGE DB_IMAGE REDIS_IMAGE DB_DIR
-    DB_DIR="${compat_db_dir}"
-
-    compose_exec -f "${COMPOSE_FILE}" --env-file "${ENV_FILE}" "$@"
-}
-
-dir_has_contents() {
-    local dir="$1"
-    [[ -d "${dir}" ]] || return 1
-    find "${dir}" -mindepth 1 -print -quit 2>/dev/null | grep -q .
-}
-
-derive_db_dir_from_external() {
-    local external_data_dir="$1"
-    local normalized="${external_data_dir%/}"
-    echo "${normalized}/DB"
-}
-
-normalize_path() {
-    local path="$1"
-    echo "${path%/}"
-}
-
-current_db_mount_source() {
-    if ! container_exists "${DB_CONTAINER_NAME}"; then
-        return 1
-    fi
-
-    docker_exec inspect \
-        --format '{{range .Mounts}}{{if eq .Destination "/var/lib/mysql"}}{{.Source}}{{end}}{{end}}' \
-        "${DB_CONTAINER_NAME}" 2>/dev/null
-}
-
-ensure_db_mount_target() {
-    local expected_db_dir="$1"
-    local current_mount expected_norm current_norm
-
-    current_mount="$(current_db_mount_source || true)"
-    if [[ -z "${current_mount}" ]]; then
-        return 0
-    fi
-
-    expected_norm="$(normalize_path "${expected_db_dir}")"
-    current_norm="$(normalize_path "${current_mount}")"
-
-    if [[ "${current_norm}" == "${expected_norm}" ]]; then
-        return 0
-    fi
-
-    log "DB container mount mismatch detected."
-    log "Expected: ${expected_norm}"
-    log "Current:  ${current_norm}"
-    log "Recreating DB container with expected mount path..."
-
-    compose_stack_exec stop >/dev/null || true
-    if container_exists "${DB_CONTAINER_NAME}"; then
-        docker_exec rm "${DB_CONTAINER_NAME}" >/dev/null || true
-    fi
-}
-
-migrate_db_dir_if_needed() {
-    local target_db_dir="$1"
-    local configured_db_dir legacy_candidate source_db_dir=""
-
-    configured_db_dir="$(read_env_value "NEXTCLOUD_DB_DIR" || true)"
-    legacy_candidate="${LEGACY_DB_DIR}"
-
-    ensure_dir_exists "${target_db_dir}"
-
-    if [[ -n "${configured_db_dir}" && "${configured_db_dir}" != "${target_db_dir}" && -d "${configured_db_dir}" ]]; then
-        source_db_dir="${configured_db_dir}"
-    elif [[ -z "${configured_db_dir}" && -d "${legacy_candidate}" && "${legacy_candidate}" != "${target_db_dir}" ]]; then
-        source_db_dir="${legacy_candidate}"
-    fi
-
-    if [[ -z "${source_db_dir}" ]]; then
-        return 0
-    fi
-
-    if ! dir_has_contents "${source_db_dir}"; then
-        return 0
-    fi
-
-    if dir_has_contents "${target_db_dir}"; then
-        log "Target DB directory already has data; skipping DB migration."
-        return 0
-    fi
-
-    if stack_present; then
-        log "Stopping existing stack before DB migration..."
-        compose_stack_exec stop >/dev/null || true
-    fi
-
-    log "Migrating DB data from ${source_db_dir} to ${target_db_dir}"
-    if command -v rsync >/dev/null 2>&1; then
-        if ! rsync -a "${source_db_dir}/" "${target_db_dir}/"; then
-            log "Direct rsync failed; retrying DB migration with sudo..."
-            sudo rsync -a "${source_db_dir}/" "${target_db_dir}/"
-        fi
-    else
-        if ! cp -a "${source_db_dir}/." "${target_db_dir}/"; then
-            log "Direct copy failed; retrying DB migration with sudo..."
-            sudo cp -a "${source_db_dir}/." "${target_db_dir}/"
-        fi
-    fi
+    [[ -f "${ENV_FILE}" && -f "${COMPOSE_FILE}" && -d "${NEXTCLOUD_APP_DIR}" && -d "${DB_DIR}" ]]
 }
 
 start_stack() {
     if [[ "${ACTION}" == "run" ]]; then
         log "Pulling latest images..."
-        compose_stack_exec pull
+        compose_exec -f "${COMPOSE_FILE}" --env-file "${ENV_FILE}" pull
     fi
 
-    compose_stack_exec up -d
+    compose_exec -f "${COMPOSE_FILE}" --env-file "${ENV_FILE}" up -d
 }
 
 # ── Parse action ──────────────────────────────────────────────────────────────
@@ -427,7 +272,8 @@ if [[ "${ACTION}" == "delete" ]]; then
     log "=== Shutting down Nextcloud stack and removing local files ==="
 
     if stack_present; then
-        compose_stack_exec down >/dev/null || true
+        sync_compose_template
+        compose_exec -f "${COMPOSE_FILE}" --env-file "${ENV_FILE}" down >/dev/null || true
     else
         if container_running "${NEXTCLOUD_CONTAINER_NAME}"; then
             docker_exec stop "${NEXTCLOUD_CONTAINER_NAME}" >/dev/null || true
@@ -493,7 +339,8 @@ if [[ "${ACTION}" == "off" ]]; then
         exit 0
     fi
 
-    compose_stack_exec stop
+    sync_compose_template
+    compose_exec -f "${COMPOSE_FILE}" --env-file "${ENV_FILE}" stop
     log "Stack stopped."
     exit 0
 fi
@@ -510,15 +357,9 @@ if [[ "${ACTION}" == "on" ]]; then
         log "Error: external data directory is missing. Run without flags to reconfigure."
         exit 1
     fi
-
-    db_dir="$(read_env_value "NEXTCLOUD_DB_DIR" || true)"
-    if [[ -z "${db_dir}" || ! -d "${db_dir}" ]]; then
-        log "Error: DB directory is missing. Run without flags to reconfigure."
-        exit 1
-    fi
 fi
 
-mkdir -p "${NEXTCLOUD_APP_DIR}"
+mkdir -p "${NEXTCLOUD_APP_DIR}" "${DB_DIR}"
 
 if [[ "${ACTION}" == "run" ]]; then
     external_dir="$(read_env_value "NEXTCLOUD_EXTERNAL_DATA_DIR" || true)"
@@ -526,29 +367,19 @@ if [[ "${ACTION}" == "run" ]]; then
         external_dir="$(prompt_external_data_dir)"
     fi
 
-    db_dir="$(derive_db_dir_from_external "${external_dir}")"
-    migrate_db_dir_if_needed "${db_dir}"
-    ensure_dir_exists "${db_dir}"
-
-    write_env_file "${external_dir}" "${db_dir}"
-    write_compose_file
+    write_env_file "${external_dir}"
 fi
 
-if [[ ! -f "${COMPOSE_FILE}" || ! -f "${ENV_FILE}" ]]; then
-    log "Error: missing compose or env configuration."
+if [[ ! -f "${ENV_FILE}" ]]; then
+    log "Error: missing env configuration."
     exit 1
 fi
+
+sync_compose_template
 
 if [[ "${ACTION}" == "on" ]] && container_running "${NEXTCLOUD_CONTAINER_NAME}" && container_running "${DB_CONTAINER_NAME}"; then
     log "${STACK_NAME} is already running at http://localhost:${PORT}"
     exit 0
-fi
-
-if [[ "${ACTION}" == "run" ]]; then
-    db_dir="$(read_env_value "NEXTCLOUD_DB_DIR" || true)"
-    if [[ -n "${db_dir}" ]]; then
-        ensure_db_mount_target "${db_dir}"
-    fi
 fi
 
 start_stack
