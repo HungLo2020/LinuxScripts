@@ -32,8 +32,8 @@ RESYNC_LOG="$LOG_DIR/onedrive-server-bisync-resync.log"
 CRON_BLOCK_BEGIN="# >>> LinuxScripts OneDriveServer >>>"
 CRON_BLOCK_END="# <<< LinuxScripts OneDriveServer <<<"
 
-BISYNC_CMD="/usr/bin/flock -n \"$LOCK_FILE\" /usr/bin/rclone bisync \"$RCLONE_REMOTE\" \"$ONEDRIVE_DIR\" --config \"$RCLONE_CONFIG\" --onedrive-expose-personal-vault=false --check-access --verbose >> \"$BISYNC_LOG\" 2>&1"
-RESYNC_CMD="/usr/bin/flock -n \"$LOCK_FILE\" /usr/bin/rclone bisync \"$RCLONE_REMOTE\" \"$ONEDRIVE_DIR\" --config \"$RCLONE_CONFIG\" --onedrive-expose-personal-vault=false --resync --check-access --verbose >> \"$RESYNC_LOG\" 2>&1"
+BISYNC_CMD="/usr/bin/flock -n \"$LOCK_FILE\" /usr/bin/rclone bisync \"$RCLONE_REMOTE\" \"$ONEDRIVE_DIR\" --config \"$RCLONE_CONFIG\" --exclude \"Personal Vault/**\" --exclude \"Personal Vault\" --check-access --verbose >> \"$BISYNC_LOG\" 2>&1"
+RESYNC_CMD="/usr/bin/flock -n \"$LOCK_FILE\" /usr/bin/rclone bisync \"$RCLONE_REMOTE\" \"$ONEDRIVE_DIR\" --config \"$RCLONE_CONFIG\" --exclude \"Personal Vault/**\" --exclude \"Personal Vault\" --resync --check-access --verbose >> \"$RESYNC_LOG\" 2>&1"
 
 DESIRED_CRON_ENTRIES=(
   "*/5 * * * * $BISYNC_CMD"
@@ -84,7 +84,7 @@ done
 run_as_target_user mkdir -p "$LOCK_DIR" "$LOG_DIR"
 
 echo "Running initial one-time bisync resync for '$RCLONE_REMOTE' <-> '$ONEDRIVE_DIR'..."
-run_as_target_user rclone bisync "$RCLONE_REMOTE" "$ONEDRIVE_DIR" --config "$RCLONE_CONFIG" --onedrive-expose-personal-vault=false --resync --check-access --verbose
+run_as_target_user rclone bisync "$RCLONE_REMOTE" "$ONEDRIVE_DIR" --config "$RCLONE_CONFIG" --exclude "Personal Vault/**" --exclude "Personal Vault" --resync --check-access --verbose
 
 if [[ "$(id -u)" -eq 0 ]]; then
   current_crontab="$(crontab -u "$TARGET_USER" -l 2>/dev/null || true)"
