@@ -249,19 +249,18 @@ stack_present() {
     [[ -f "${ENV_FILE}" && -f "${COMPOSE_FILE}" && -d "${NEXTCLOUD_APP_DIR}" && -d "${DB_DIR}" ]]
 }
 
-start_stack() {
-    local image_args=()
-    image_args+=("NEXTCLOUD_IMAGE=${NEXTCLOUD_IMAGE}")
-    image_args+=("DB_IMAGE=${DB_IMAGE}")
-    image_args+=("REDIS_IMAGE=${REDIS_IMAGE}")
-    image_args+=("DB_DIR=${DB_DIR}")
+compose_stack_exec() {
+    export NEXTCLOUD_IMAGE DB_IMAGE REDIS_IMAGE DB_DIR
+    compose_exec -f "${COMPOSE_FILE}" --env-file "${ENV_FILE}" "$@"
+}
 
+start_stack() {
     if [[ "${ACTION}" == "run" ]]; then
         log "Pulling latest images..."
-        env "${image_args[@]}" compose_exec -f "${COMPOSE_FILE}" --env-file "${ENV_FILE}" pull
+        compose_stack_exec pull
     fi
 
-    env "${image_args[@]}" compose_exec -f "${COMPOSE_FILE}" --env-file "${ENV_FILE}" up -d
+    compose_stack_exec up -d
 }
 
 # ── Parse action ──────────────────────────────────────────────────────────────
@@ -296,13 +295,7 @@ if [[ "${ACTION}" == "delete" ]]; then
     log "=== Shutting down Nextcloud stack and removing local files ==="
 
     if stack_present; then
-        image_args=(
-            "NEXTCLOUD_IMAGE=${NEXTCLOUD_IMAGE}"
-            "DB_IMAGE=${DB_IMAGE}"
-            "REDIS_IMAGE=${REDIS_IMAGE}"
-            "DB_DIR=${DB_DIR}"
-        )
-        env "${image_args[@]}" compose_exec -f "${COMPOSE_FILE}" --env-file "${ENV_FILE}" down >/dev/null || true
+        compose_stack_exec down >/dev/null || true
     else
         if container_running "${NEXTCLOUD_CONTAINER_NAME}"; then
             docker_exec stop "${NEXTCLOUD_CONTAINER_NAME}" >/dev/null || true
@@ -368,13 +361,7 @@ if [[ "${ACTION}" == "off" ]]; then
         exit 0
     fi
 
-    image_args=(
-        "NEXTCLOUD_IMAGE=${NEXTCLOUD_IMAGE}"
-        "DB_IMAGE=${DB_IMAGE}"
-        "REDIS_IMAGE=${REDIS_IMAGE}"
-        "DB_DIR=${DB_DIR}"
-    )
-    env "${image_args[@]}" compose_exec -f "${COMPOSE_FILE}" --env-file "${ENV_FILE}" stop
+    compose_stack_exec stop
     log "Stack stopped."
     exit 0
 fi
