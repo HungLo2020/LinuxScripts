@@ -8,7 +8,7 @@
 #   - Sonarr
 #   - Seerr
 #   - Jackett
-#   - qBittorrent (behind NordVPN via Gluetun kill-switch)
+#   - qBittorrent (behind ProtonVPN via Gluetun kill-switch)
 #
 # Usage:
 #   ./RunJellyfinStackContainer.sh          Install/update and start stack
@@ -191,25 +191,25 @@ bitwarden_status() {
   fi
 }
 
-try_bitwarden_nordvpn_credentials() {
-  local item_name="${BITWARDEN_NORDVPN_ITEM:-NordVPN}"
+try_bitwarden_protonvpn_credentials() {
+  local item_name="${BITWARDEN_PROTONVPN_ITEM:-ProtonVPN}"
   local status
   local session
   local bw_user
   local bw_pass
 
   if ! command -v bw >/dev/null 2>&1; then
-    log "Bitwarden CLI (bw) not found; using manual NordVPN credential entry."
+    log "Bitwarden CLI (bw) not found; using manual ProtonVPN credential entry."
     return 1
   fi
 
-  log "Attempting Bitwarden lookup for NordVPN credentials (item: ${item_name})..."
+  log "Attempting Bitwarden lookup for ProtonVPN credentials (item: ${item_name})..."
   status="$(bitwarden_status)"
 
   if [[ "$status" == "unauthenticated" || "$status" == "unknown" ]]; then
     log "Bitwarden CLI is not authenticated. Attempting 'bw login'..."
     if ! bw login </dev/tty >/dev/tty 2>&1; then
-      log "Bitwarden login failed; falling back to manual NordVPN credential entry."
+      log "Bitwarden login failed; falling back to manual ProtonVPN credential entry."
       return 1
     fi
     status="$(bitwarden_status)"
@@ -226,7 +226,7 @@ try_bitwarden_nordvpn_credentials() {
       session="$(bw unlock --raw </dev/tty 2>/dev/null || true)"
     fi
     if [[ -z "$session" ]]; then
-      log "Bitwarden unlock failed; falling back to manual NordVPN credential entry."
+      log "Bitwarden unlock failed; falling back to manual ProtonVPN credential entry."
       return 1
     fi
     export BW_SESSION="$session"
@@ -240,8 +240,8 @@ try_bitwarden_nordvpn_credentials() {
     return 1
   fi
 
-  NORDVPN_USER_FROM_BW="$bw_user"
-  NORDVPN_PASS_FROM_BW="$bw_pass"
+  PROTONVPN_USER_FROM_BW="$bw_user"
+  PROTONVPN_PASS_FROM_BW="$bw_pass"
   return 0
 }
 
@@ -249,9 +249,9 @@ write_env_file() {
   local media_path="$1"
   local music_path="$2"
   local downloads_path="$3"
-  local nord_user="$4"
-  local nord_pass="$5"
-  local nord_country="$6"
+  local proton_user="$4"
+  local proton_pass="$5"
+  local proton_country="$6"
 
   mkdir -p "${STACK_ROOT}"
   cp -f "${ENV_TEMPLATE}" "${STACK_ENV_FILE}"
@@ -271,9 +271,9 @@ MEDIA_PATH=${media_path}
 MUSIC_PATH=${music_path}
 DOWNLOADS_PATH=${downloads_path}
 
-NORDVPN_USER=${nord_user}
-NORDVPN_PASSWORD=${nord_pass}
-NORDVPN_COUNTRY=${nord_country}
+PROTONVPN_USER=${proton_user}
+PROTONVPN_PASSWORD=${proton_pass}
+PROTONVPN_COUNTRY=${proton_country}
 
 JELLYFIN_PORT=8096
 RADARR_PORT=7878
@@ -289,6 +289,90 @@ EOF
 copy_compose_file() {
   mkdir -p "${STACK_ROOT}"
   cp -f "${COMPOSE_TEMPLATE}" "${STACK_COMPOSE_FILE}"
+}
+
+env_value() {
+  local key="$1"
+  local file="$2"
+  sed -n "s/^${key}=//p" "$file" | head -n1
+}
+
+migrate_installed_stack_to_protonvpn_if_needed() {
+  if [[ ! -f "${STACK_COMPOSE_FILE}" || ! -f "${STACK_ENV_FILE}" ]]; then
+    return 0
+  fi
+
+  local needs_migration="false"
+  if grep -q 'VPN_SERVICE_PROVIDER=nordvpn' "${STACK_COMPOSE_FILE}"; then
+    needs_migration="true"
+  fi
+  if grep -q '^NORDVPN_' "${STACK_ENV_FILE}"; then
+    needs_migration="true"
+  fi
+
+  if [[ "${needs_migration}" != "true" ]]; then
+    return 0
+  fi
+
+  log "Existing stack appears to use NordVPN; migrating configuration to ProtonVPN..."
+
+  local proton_user=""
+  local proton_pass=""
+  local proton_country=""
+
+  proton_country="$(env_value "PROTONVPN_COUNTRY" "${STACK_ENV_FILE}")"
+  if [[ -z "${proton_country}" ]]; then
+    proton_country="$(env_value "NORDVPN_COUNTRY" "${STACK_ENV_FILE}")"
+  fi
+  if [[ -z "${proton_country}" ]]; then
+    proton_country="United States"
+  fi
+
+  if try_bitwarden_protonvpn_credentials; then
+    proton_user="$PROTONVPN_USER_FROM_BW"
+    proton_pass="$PROTONVPN_PASS_FROM_BW"
+    log "Using ProtonVPN credentials from Bitwarden for migration."
+  else
+    echo "Error: migration requires Bitwarden item 'ProtonVPN' with username/password."
+    exit 1
+  fi
+
+  local tmp_env
+  tmp_env="$(mktemp)"
+  awk -v user="$proton_user" -v pass="$proton_pass" -v country="$proton_country" '
+    BEGIN {
+      seen_user=0; seen_pass=0; seen_country=0;
+    }
+    /^NORDVPN_USER=/ || /^PROTONVPN_USER=/ {
+      if (!seen_user) { print "PROTONVPN_USER=" user; seen_user=1; }
+      next
+    }
+    /^NORDVPN_PASSWORD=/ || /^PROTONVPN_PASSWORD=/ {
+      if (!seen_pass) { print "PROTONVPN_PASSWORD=" pass; seen_pass=1; }
+      next
+    }
+    /^NORDVPN_COUNTRY=/ || /^PROTONVPN_COUNTRY=/ {
+      if (!seen_country) { print "PROTONVPN_COUNTRY=" country; seen_country=1; }
+      next
+    }
+    { print }
+    END {
+      if (!seen_user) print "PROTONVPN_USER=" user;
+      if (!seen_pass) print "PROTONVPN_PASSWORD=" pass;
+      if (!seen_country) print "PROTONVPN_COUNTRY=" country;
+    }
+  ' "${STACK_ENV_FILE}" > "${tmp_env}"
+
+  mv "${tmp_env}" "${STACK_ENV_FILE}"
+
+  sed -i \
+    -e 's/VPN_SERVICE_PROVIDER=nordvpn/VPN_SERVICE_PROVIDER=protonvpn/g' \
+    -e 's/${NORDVPN_USER}/${PROTONVPN_USER}/g' \
+    -e 's/${NORDVPN_PASSWORD}/${PROTONVPN_PASSWORD}/g' \
+    -e 's/${NORDVPN_COUNTRY}/${PROTONVPN_COUNTRY}/g' \
+    "${STACK_COMPOSE_FILE}"
+
+  log "Migration to ProtonVPN completed."
 }
 
 print_qbittorrent_credentials() {
@@ -386,6 +470,7 @@ case "${ACTION}" in
 
   on)
     ensure_installed_for_on_off
+    migrate_installed_stack_to_protonvpn_if_needed
     start_stack
     ;;
 
@@ -413,21 +498,21 @@ case "${ACTION}" in
     fi
     mkdir -p "${downloads_path}"
 
-    if try_bitwarden_nordvpn_credentials; then
-      nord_user="$NORDVPN_USER_FROM_BW"
-      nord_pass="$NORDVPN_PASS_FROM_BW"
-      log "Using NordVPN credentials from Bitwarden."
+    if try_bitwarden_protonvpn_credentials; then
+      proton_user="$PROTONVPN_USER_FROM_BW"
+      proton_pass="$PROTONVPN_PASS_FROM_BW"
+      log "Using ProtonVPN credentials from Bitwarden."
     else
-      nord_user="$(prompt_non_empty 'NordVPN username (service credentials): ')"
-      nord_pass="$(prompt_non_empty 'NordVPN password (service credentials): ')"
+      proton_user="$(prompt_non_empty 'ProtonVPN username (OpenVPN/IKEv2 service credentials): ')"
+      proton_pass="$(prompt_non_empty 'ProtonVPN password (OpenVPN/IKEv2 service credentials): ')"
     fi
 
-    read -r -p "NordVPN country (Enter for United States): " nord_country
-    if [[ -z "${nord_country}" ]]; then
-      nord_country="United States"
+    read -r -p "ProtonVPN country (Enter for United States): " proton_country
+    if [[ -z "${proton_country}" ]]; then
+      proton_country="United States"
     fi
 
-    write_env_file "${media_path}" "${music_path}" "${downloads_path}" "${nord_user}" "${nord_pass}" "${nord_country}"
+    write_env_file "${media_path}" "${music_path}" "${downloads_path}" "${proton_user}" "${proton_pass}" "${proton_country}"
     copy_compose_file
     start_stack
     ;;

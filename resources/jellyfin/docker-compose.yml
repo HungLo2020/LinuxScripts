@@ -7,11 +7,11 @@ services:
     devices:
       - /dev/net/tun:/dev/net/tun
     environment:
-      - VPN_SERVICE_PROVIDER=nordvpn
+      - VPN_SERVICE_PROVIDER=protonvpn
       - VPN_TYPE=openvpn
-      - OPENVPN_USER=${NORDVPN_USER}
-      - OPENVPN_PASSWORD=${NORDVPN_PASSWORD}
-      - SERVER_COUNTRIES=${NORDVPN_COUNTRY}
+      - OPENVPN_USER=${PROTONVPN_USER}
+      - OPENVPN_PASSWORD=${PROTONVPN_PASSWORD}
+      - SERVER_COUNTRIES=${PROTONVPN_COUNTRY}
       - TZ=${TZ}
       - FIREWALL=on
       - DOT=off
