@@ -91,7 +91,7 @@ ensure_dir_for_user() {
 
     log "No write access to create ${path}; trying with sudo..."
     sudo mkdir -p "${path}"
-    sudo chown -R "${USER}:${USER}" "${path}"
+    sudo chown "${USER}:${USER}" "${path}"
 }
 
 ensure_docker() {
@@ -218,7 +218,7 @@ write_compose_file() {
     cat >"${COMPOSE_FILE}" <<'EOF'
 services:
   db:
-        image: mariadb:11
+    image: mariadb:11
     container_name: nextcloud-db
     restart: unless-stopped
     command: --transaction-isolation=READ-COMMITTED --binlog-format=ROW
@@ -228,7 +228,7 @@ services:
       - MYSQL_USER=${MYSQL_USER}
       - MYSQL_PASSWORD=${MYSQL_PASSWORD}
     volumes:
-            - ${NEXTCLOUD_DB_DIR}:/var/lib/mysql
+        - ${NEXTCLOUD_DB_DIR}:/var/lib/mysql
 
   redis:
         image: redis:7-alpine
@@ -264,6 +264,13 @@ stack_present() {
 }
 
 compose_stack_exec() {
+    local compat_db_dir
+    compat_db_dir="$(read_env_value "NEXTCLOUD_DB_DIR" || true)"
+    [[ -n "${compat_db_dir}" ]] || compat_db_dir="${LEGACY_DB_DIR}"
+
+    export NEXTCLOUD_IMAGE DB_IMAGE REDIS_IMAGE DB_DIR
+    DB_DIR="${compat_db_dir}"
+
     compose_exec -f "${COMPOSE_FILE}" --env-file "${ENV_FILE}" "$@"
 }
 
@@ -314,9 +321,15 @@ migrate_db_dir_if_needed() {
 
     log "Migrating DB data from ${source_db_dir} to ${target_db_dir}"
     if command -v rsync >/dev/null 2>&1; then
-        rsync -a "${source_db_dir}/" "${target_db_dir}/"
+        if ! rsync -a "${source_db_dir}/" "${target_db_dir}/"; then
+            log "Direct rsync failed; retrying DB migration with sudo..."
+            sudo rsync -a "${source_db_dir}/" "${target_db_dir}/"
+        fi
     else
-        cp -a "${source_db_dir}/." "${target_db_dir}/"
+        if ! cp -a "${source_db_dir}/." "${target_db_dir}/"; then
+            log "Direct copy failed; retrying DB migration with sudo..."
+            sudo cp -a "${source_db_dir}/." "${target_db_dir}/"
+        fi
     fi
 }
 
