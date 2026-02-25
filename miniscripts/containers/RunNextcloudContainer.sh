@@ -82,6 +82,18 @@ random_token() {
     fi
 }
 
+ensure_dir_for_user() {
+    local path="$1"
+
+    if mkdir -p "${path}" 2>/dev/null; then
+        return 0
+    fi
+
+    log "No write access to create ${path}; trying with sudo..."
+    sudo mkdir -p "${path}"
+    sudo chown -R "${USER}:${USER}" "${path}"
+}
+
 ensure_docker() {
     if ! command -v docker >/dev/null 2>&1; then
         if [[ "${ACTION}" != "run" ]]; then
@@ -144,7 +156,7 @@ prompt_external_data_dir() {
             read -r -p "Directory does not exist. Create it now? [Y/n]: " create_choice
             create_choice="${create_choice:-Y}"
             if [[ "${create_choice}" =~ ^[Yy]$ ]]; then
-                mkdir -p "${path}"
+                ensure_dir_for_user "${path}"
             else
                 echo "Please provide an existing directory."
                 continue
@@ -274,7 +286,7 @@ migrate_db_dir_if_needed() {
     configured_db_dir="$(read_env_value "NEXTCLOUD_DB_DIR" || true)"
     legacy_candidate="${LEGACY_DB_DIR}"
 
-    mkdir -p "${target_db_dir}"
+    ensure_dir_for_user "${target_db_dir}"
 
     if [[ -n "${configured_db_dir}" && "${configured_db_dir}" != "${target_db_dir}" && -d "${configured_db_dir}" ]]; then
         source_db_dir="${configured_db_dir}"
@@ -450,7 +462,7 @@ if [[ "${ACTION}" == "run" ]]; then
 
     db_dir="$(derive_db_dir_from_external "${external_dir}")"
     migrate_db_dir_if_needed "${db_dir}"
-    mkdir -p "${db_dir}"
+    ensure_dir_for_user "${db_dir}"
 
     write_env_file "${external_dir}" "${db_dir}"
     write_compose_file
