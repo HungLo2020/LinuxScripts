@@ -20,8 +20,7 @@ SYSTEMD_SERVICE_NAME="storage-smb-mount.service"
 SYSTEMD_SERVICE_PATH="/etc/systemd/system/${SYSTEMD_SERVICE_NAME}"
 HELPER_SCRIPT_PATH="/usr/local/sbin/storage-smb-mount.sh"
 
-BITWARDEN_ITEM_PRIMARY="${TARGET_USER}"
-BITWARDEN_ITEM_FALLBACK="PCPassword"
+BITWARDEN_ITEM_NAME="PCPassword"
 SMB_PASSWORD=""
 
 if [[ -z "$TARGET_HOME" || ! -d "$TARGET_HOME" ]]; then
@@ -194,19 +193,10 @@ resolve_bitwarden_smb_password() {
     export BW_SESSION="$session"
   fi
 
-  password="$(resolve_bitwarden_password_from_item "$BITWARDEN_ITEM_PRIMARY")"
+  password="$(resolve_bitwarden_password_from_item "$BITWARDEN_ITEM_NAME")"
   if [[ -z "$password" ]]; then
     bw_exec sync >/dev/null 2>&1 || true
-    password="$(resolve_bitwarden_password_from_item "$BITWARDEN_ITEM_PRIMARY")"
-  fi
-
-  if [[ -z "$password" ]]; then
-    password="$(resolve_bitwarden_password_from_item "$BITWARDEN_ITEM_FALLBACK")"
-  fi
-
-  if [[ -z "$password" ]]; then
-    bw_exec sync >/dev/null 2>&1 || true
-    password="$(resolve_bitwarden_password_from_item "$BITWARDEN_ITEM_FALLBACK")"
+    password="$(resolve_bitwarden_password_from_item "$BITWARDEN_ITEM_NAME")"
   fi
 
   if [[ -n "$password" ]]; then
@@ -337,7 +327,7 @@ ensure_tailscale_installed
 ensure_tailscale_running
 
 if ! resolve_bitwarden_smb_password; then
-  echo "Bitwarden password resolution failed for '${BITWARDEN_ITEM_PRIMARY}' and fallback '${BITWARDEN_ITEM_FALLBACK}'."
+  echo "Bitwarden password resolution failed for '${BITWARDEN_ITEM_NAME}'."
   prompt_smb_password_fallback
 fi
 
