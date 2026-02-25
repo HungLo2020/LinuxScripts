@@ -30,7 +30,7 @@ REDIS_IMAGE="redis:7-alpine"
 
 BASE_DATA_DIR="${HOME}/.nextcloud"
 NEXTCLOUD_APP_DIR="${BASE_DATA_DIR}/app"
-DB_DIR="${BASE_DATA_DIR}/db"
+LEGACY_DB_DIR="${BASE_DATA_DIR}/db"
 ENV_FILE="${BASE_DATA_DIR}/.env"
 COMPOSE_FILE="${BASE_DATA_DIR}/docker-compose.yml"
 PORT=8082
@@ -175,6 +175,7 @@ read_env_value() {
 
 write_env_file() {
     local external_data_dir="$1"
+    local db_dir="$2"
     local db_root_password db_password redis_password
 
     db_root_password="$(read_env_value "MYSQL_ROOT_PASSWORD" || true)"
@@ -189,6 +190,7 @@ write_env_file() {
 NEXTCLOUD_PORT=${PORT}
 NEXTCLOUD_APP_DIR=${NEXTCLOUD_APP_DIR}
 NEXTCLOUD_EXTERNAL_DATA_DIR=${external_data_dir}
+NEXTCLOUD_DB_DIR=${db_dir}
 NEXTCLOUD_TRUSTED_DOMAINS=localhost 127.0.0.1
 
 MYSQL_DATABASE=nextcloud
@@ -204,7 +206,7 @@ write_compose_file() {
     cat >"${COMPOSE_FILE}" <<'EOF'
 services:
   db:
-    image: ${DB_IMAGE}
+        image: mariadb:11
     container_name: nextcloud-db
     restart: unless-stopped
     command: --transaction-isolation=READ-COMMITTED --binlog-format=ROW
@@ -214,16 +216,16 @@ services:
       - MYSQL_USER=${MYSQL_USER}
       - MYSQL_PASSWORD=${MYSQL_PASSWORD}
     volumes:
-      - ${DB_DIR}:/var/lib/mysql
+            - ${NEXTCLOUD_DB_DIR}:/var/lib/mysql
 
   redis:
-    image: ${REDIS_IMAGE}
+        image: redis:7-alpine
     container_name: nextcloud-redis
     restart: unless-stopped
     command: redis-server --requirepass ${REDIS_PASSWORD}
 
   app:
-    image: ${NEXTCLOUD_IMAGE}
+        image: nextcloud:latest
     container_name: nextcloud-app
     restart: unless-stopped
     depends_on:
@@ -246,12 +248,64 @@ EOF
 }
 
 stack_present() {
-    [[ -f "${ENV_FILE}" && -f "${COMPOSE_FILE}" && -d "${NEXTCLOUD_APP_DIR}" && -d "${DB_DIR}" ]]
+    [[ -f "${ENV_FILE}" && -f "${COMPOSE_FILE}" && -d "${NEXTCLOUD_APP_DIR}" ]]
 }
 
 compose_stack_exec() {
-    export NEXTCLOUD_IMAGE DB_IMAGE REDIS_IMAGE DB_DIR
     compose_exec -f "${COMPOSE_FILE}" --env-file "${ENV_FILE}" "$@"
+}
+
+dir_has_contents() {
+    local dir="$1"
+    [[ -d "${dir}" ]] || return 1
+    find "${dir}" -mindepth 1 -print -quit 2>/dev/null | grep -q .
+}
+
+derive_db_dir_from_external() {
+    local external_data_dir="$1"
+    local normalized="${external_data_dir%/}"
+    echo "${normalized}/DB"
+}
+
+migrate_db_dir_if_needed() {
+    local target_db_dir="$1"
+    local configured_db_dir legacy_candidate source_db_dir=""
+
+    configured_db_dir="$(read_env_value "NEXTCLOUD_DB_DIR" || true)"
+    legacy_candidate="${LEGACY_DB_DIR}"
+
+    mkdir -p "${target_db_dir}"
+
+    if [[ -n "${configured_db_dir}" && "${configured_db_dir}" != "${target_db_dir}" && -d "${configured_db_dir}" ]]; then
+        source_db_dir="${configured_db_dir}"
+    elif [[ -z "${configured_db_dir}" && -d "${legacy_candidate}" && "${legacy_candidate}" != "${target_db_dir}" ]]; then
+        source_db_dir="${legacy_candidate}"
+    fi
+
+    if [[ -z "${source_db_dir}" ]]; then
+        return 0
+    fi
+
+    if ! dir_has_contents "${source_db_dir}"; then
+        return 0
+    fi
+
+    if dir_has_contents "${target_db_dir}"; then
+        log "Target DB directory already has data; skipping DB migration."
+        return 0
+    fi
+
+    if stack_present; then
+        log "Stopping existing stack before DB migration..."
+        compose_stack_exec stop >/dev/null || true
+    fi
+
+    log "Migrating DB data from ${source_db_dir} to ${target_db_dir}"
+    if command -v rsync >/dev/null 2>&1; then
+        rsync -a "${source_db_dir}/" "${target_db_dir}/"
+    else
+        cp -a "${source_db_dir}/." "${target_db_dir}/"
+    fi
 }
 
 start_stack() {
@@ -378,9 +432,15 @@ if [[ "${ACTION}" == "on" ]]; then
         log "Error: external data directory is missing. Run without flags to reconfigure."
         exit 1
     fi
+
+    db_dir="$(read_env_value "NEXTCLOUD_DB_DIR" || true)"
+    if [[ -z "${db_dir}" || ! -d "${db_dir}" ]]; then
+        log "Error: DB directory is missing. Run without flags to reconfigure."
+        exit 1
+    fi
 fi
 
-mkdir -p "${NEXTCLOUD_APP_DIR}" "${DB_DIR}"
+mkdir -p "${NEXTCLOUD_APP_DIR}"
 
 if [[ "${ACTION}" == "run" ]]; then
     external_dir="$(read_env_value "NEXTCLOUD_EXTERNAL_DATA_DIR" || true)"
@@ -388,7 +448,11 @@ if [[ "${ACTION}" == "run" ]]; then
         external_dir="$(prompt_external_data_dir)"
     fi
 
-    write_env_file "${external_dir}"
+    db_dir="$(derive_db_dir_from_external "${external_dir}")"
+    migrate_db_dir_if_needed "${db_dir}"
+    mkdir -p "${db_dir}"
+
+    write_env_file "${external_dir}" "${db_dir}"
     write_compose_file
 fi
 
@@ -397,7 +461,7 @@ if [[ ! -f "${COMPOSE_FILE}" || ! -f "${ENV_FILE}" ]]; then
     exit 1
 fi
 
-if container_running "${NEXTCLOUD_CONTAINER_NAME}" && container_running "${DB_CONTAINER_NAME}"; then
+if [[ "${ACTION}" == "on" ]] && container_running "${NEXTCLOUD_CONTAINER_NAME}" && container_running "${DB_CONTAINER_NAME}"; then
     log "${STACK_NAME} is already running at http://localhost:${PORT}"
     exit 0
 fi
