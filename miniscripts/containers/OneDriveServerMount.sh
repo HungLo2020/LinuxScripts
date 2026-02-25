@@ -69,6 +69,11 @@ if ! command -v rclone >/dev/null 2>&1; then
   exit 1
 fi
 
+if ! command -v crontab >/dev/null 2>&1; then
+  echo "Error: crontab command is not available. Install cron before running this script."
+  exit 1
+fi
+
 echo "Ensuring rclone remote '$RCLONE_REMOTE' exists for user '$TARGET_USER'..."
 while true; do
   if run_as_target_user rclone listremotes --config "$RCLONE_CONFIG" 2>/dev/null | grep -qE '^OneDrive:$'; then
@@ -82,9 +87,6 @@ while true; do
 done
 
 run_as_target_user mkdir -p "$LOCK_DIR" "$LOG_DIR"
-
-echo "Running initial one-time bisync resync for '$RCLONE_REMOTE' <-> '$ONEDRIVE_DIR'..."
-run_as_target_user rclone bisync "$RCLONE_REMOTE" "$ONEDRIVE_DIR" --config "$RCLONE_CONFIG" --exclude "Personal Vault/**" --exclude "Personal Vault" --resync --check-access --verbose
 
 if [[ "$(id -u)" -eq 0 ]]; then
   current_crontab="$(crontab -u "$TARGET_USER" -l 2>/dev/null || true)"
@@ -113,4 +115,23 @@ else
 fi
 
 echo "Updated managed OneDriveServer cron block with ${#DESIRED_CRON_ENTRIES[@]} entries."
+
+if [[ "$(id -u)" -eq 0 ]]; then
+  installed_crontab="$(crontab -u "$TARGET_USER" -l 2>/dev/null || true)"
+else
+  installed_crontab="$(crontab -l 2>/dev/null || true)"
+fi
+
+if ! grep -qF "$CRON_BLOCK_BEGIN" <<<"$installed_crontab" || ! grep -qF "$CRON_BLOCK_END" <<<"$installed_crontab"; then
+  echo "Error: OneDriveServer cron block verification failed after write."
+  exit 1
+fi
+
+echo "Verified OneDriveServer cron block is present in crontab."
+
+echo "Running initial one-time bisync resync for '$RCLONE_REMOTE' <-> '$ONEDRIVE_DIR'..."
+if ! run_as_target_user rclone bisync "$RCLONE_REMOTE" "$ONEDRIVE_DIR" --config "$RCLONE_CONFIG" --exclude "Personal Vault/**" --exclude "Personal Vault" --resync --check-access --verbose; then
+  echo "Warning: initial bisync resync failed. Cron sync schedule is still installed; check logs and rerun once issues are resolved."
+fi
+
 echo "OneDrive server sync setup complete."
