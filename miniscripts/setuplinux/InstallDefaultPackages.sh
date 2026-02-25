@@ -3,7 +3,6 @@
 set -euo pipefail
 
 packages=(
-  "rclone"
   "qdirstat"
   "baobab"
   "partitionmanager"

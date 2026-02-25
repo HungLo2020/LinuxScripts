@@ -2,7 +2,7 @@
 
 set -euo pipefail
 
-DEST_DIR="/home/matt/OneDrive/Apps/Programming/LinuxScripts/"
+DEST_DIR="/mnt/storage/OneDrive/Apps/Programming/LinuxScripts/"
 EXCLUDES=("node_modules" "*.tmp" ".git")
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
