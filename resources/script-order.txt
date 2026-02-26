@@ -3,6 +3,7 @@
 
 [first]
 AddRepos.sh
+RDSetup.sh
 SetupSMBMount.sh
 
 [last]
