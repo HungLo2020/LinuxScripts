@@ -91,7 +91,7 @@ ensure_smb_client() {
 
 ensure_tailscale_installed() {
   if ! command -v tailscale >/dev/null 2>&1; then
-    echo "Error: tailscale is not installed. Install tailscale before running this script."
+    echo "Error: tailscale is not installed. please run RDSetup.sh before running this script."
     exit 1
   fi
 }
@@ -99,7 +99,7 @@ ensure_tailscale_installed() {
 ensure_tailscale_running() {
   local status_json
   if ! status_json="$(tailscale status --json 2>/dev/null)"; then
-    echo "Error: tailscale is not running or not logged in. Start tailscaled and connect with 'tailscale up' first."
+    echo "Error: tailscale is not running or not logged in. Start tailscaled and connect with 'tailscale up' first. Or run RDSetup.sh"
     exit 1
   fi
 
