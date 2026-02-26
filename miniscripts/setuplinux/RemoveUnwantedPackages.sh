@@ -22,6 +22,7 @@ unwanted_packages=(
   "kpat"
   "ksudoku"
   "katawa-shoujo"
+  "anydesk"
 )
 
 echo "Removing unwanted packages..."
