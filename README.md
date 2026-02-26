@@ -3,7 +3,7 @@
 Personal Linux automation scripts for:
 
 - Linux workstation bootstrap (`SetupLinux.sh`)
-- Container app lifecycle management (`SetupContainers.sh`)
+- Container app lifecycle management (`miniscripts/server/ContainerManager.sh`)
 - KDE profile workflows (konsave import/export + GitHub Releases sync)
 - OneDrive/rclone sync and desktop utility setup
 
@@ -14,11 +14,13 @@ Most scripts are written for Ubuntu/Debian-style systems (`apt`, `dpkg`, `sudo`)
 ```text
 .
 ├── SetupLinux.sh
-├── SetupContainers.sh
 ├── miniscripts/
 │   ├── setuplinux/      # Linux setup scripts (auto-discovered)
 │   ├── containers/      # Container lifecycle scripts
+│   ├── server/          # Server management scripts
 │   └── notautorun/      # Helper scripts called by others
+├── Tools/
+│   └── TailscaleList.sh
 ├── resources/
 │   ├── script-order.txt
 │   ├── variety.conf
@@ -49,7 +51,7 @@ What it does:
 ### 2) Container setup flow
 
 ```bash
-bash SetupContainers.sh
+bash miniscripts/server/ContainerManager.sh
 ```
 
 What it does:

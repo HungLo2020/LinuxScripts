@@ -3,7 +3,11 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-CONTAINER_SCRIPTS_DIR="$SCRIPT_DIR/miniscripts/containers"
+REPO_ROOT="$SCRIPT_DIR"
+while [[ "$REPO_ROOT" != "/" && ! -d "$REPO_ROOT/miniscripts/containers" ]]; do
+  REPO_ROOT="$(dirname "$REPO_ROOT")"
+done
+CONTAINER_SCRIPTS_DIR="$REPO_ROOT/miniscripts/containers"
 
 BLUE='\033[34m'
 GREEN='\033[32m'

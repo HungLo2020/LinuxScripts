@@ -3,8 +3,13 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-DROPLET_SCRIPTS_DIR="$SCRIPT_DIR/miniscripts/droplet"
-SETUP_MATT_USER_SCRIPT="$SCRIPT_DIR/miniscripts/notautorun/SetupMattUser.sh"
+REPO_ROOT="$SCRIPT_DIR"
+while [[ "$REPO_ROOT" != "/" && ! -d "$REPO_ROOT/miniscripts/droplet" ]]; do
+  REPO_ROOT="$(dirname "$REPO_ROOT")"
+done
+
+DROPLET_SCRIPTS_DIR="$REPO_ROOT/miniscripts/droplet"
+SETUP_MATT_USER_SCRIPT="$REPO_ROOT/miniscripts/notautorun/SetupMattUser.sh"
 TARGET_USER="matt"
 
 SELECTED_SCRIPTS=()
@@ -56,14 +61,13 @@ ensure_repo_location_for_target_user() {
 
   run_privileged mkdir -p "$target_parent"
 
-  # Keep current repo usable for the target user even when not relocating.
-  run_privileged chown -R "$TARGET_USER:$TARGET_USER" "$SCRIPT_DIR"
+  run_privileged chown -R "$TARGET_USER:$TARGET_USER" "$REPO_ROOT"
 
-  if [[ "$SCRIPT_DIR" == "$target_repo_dir" ]]; then
+  if [[ "$REPO_ROOT" == "$target_repo_dir" ]]; then
     return 0
   fi
 
-  echo "Current repo location is '$SCRIPT_DIR'."
+  echo "Current repo location is '$REPO_ROOT'."
   echo "Recommended droplet location is '$target_repo_dir'."
 
   if ! ask_yes_no "Move repo to '$target_repo_dir' and continue from there?"; then
@@ -78,15 +82,15 @@ ensure_repo_location_for_target_user() {
 
   if [[ ! -d "$target_repo_dir/.git" ]]; then
     run_privileged mkdir -p "$target_repo_dir"
-    run_privileged cp -a "$SCRIPT_DIR/." "$target_repo_dir/"
+    run_privileged cp -a "$REPO_ROOT/." "$target_repo_dir/"
   else
-    run_privileged cp -a "$SCRIPT_DIR/." "$target_repo_dir/"
+    run_privileged cp -a "$REPO_ROOT/." "$target_repo_dir/"
   fi
 
   run_privileged chown -R "$TARGET_USER:$TARGET_USER" "$target_repo_dir"
 
   echo "Re-launching SetupDroplet from '$target_repo_dir' as '$TARGET_USER'..."
-  run_as_target_user bash "$target_repo_dir/SetupDroplet.sh"
+  run_as_target_user bash "$target_repo_dir/miniscripts/server/SetupDroplet.sh"
   exit $?
 }
 
@@ -117,9 +121,6 @@ if [[ ${#DISCOVERED_SCRIPTS[@]} -eq 0 ]]; then
   exit 0
 fi
 
-# ---------------------------
-# Question Phase (prompts only)
-# ---------------------------
 for script_path in "${DISCOVERED_SCRIPTS[@]}"; do
   relative_script="${script_path#"$DROPLET_SCRIPTS_DIR"/}"
 
@@ -128,9 +129,6 @@ for script_path in "${DISCOVERED_SCRIPTS[@]}"; do
   fi
 done
 
-# ---------------------------
-# Run Phase (execute selection)
-# ---------------------------
 if [[ ${#SELECTED_SCRIPTS[@]} -eq 0 ]]; then
   echo "No scripts selected."
   echo "Droplet setup complete."
