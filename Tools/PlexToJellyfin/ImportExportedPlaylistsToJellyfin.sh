@@ -106,21 +106,8 @@ def normalize_path(path: str) -> str:
     return path.strip().rstrip("/")
 
 
-def get_users():
-    return request_json("GET", "/Users")
-
-
-def choose_user(users):
-    if not users:
-        raise RuntimeError("No Jellyfin users returned by API key.")
-
-    if username:
-        for user in users:
-            if user.get("Name", "").lower() == username.lower():
-                return user
-        raise RuntimeError(f"User '{username}' not found for this API key.")
-
-    return users[0]
+def get_me():
+    return request_json("GET", "/Users/Me")
 
 
 def paged_items(user_id: str, include_item_types: str, fields: str):
@@ -219,13 +206,17 @@ def parse_m3u_paths(path: Path):
     return entries
 
 
-users = get_users()
-user = choose_user(users)
+user = get_me()
 user_id = user.get("Id")
 user_name = user.get("Name", "unknown")
 
 if not user_id:
     raise RuntimeError("Chosen Jellyfin user has no Id.")
+
+if username and user_name.lower() != username.lower():
+    raise RuntimeError(
+        f"Authenticated API key belongs to '{user_name}', but you entered username '{username}'."
+    )
 
 print(f"Using Jellyfin user: {user_name} ({user_id})")
 print("Indexing Jellyfin audio items by full path...")
