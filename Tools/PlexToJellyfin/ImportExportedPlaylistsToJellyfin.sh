@@ -5,6 +5,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 EXPORT_DIR="${SCRIPT_DIR}/exports"
 JELLYFIN_URL="http://100.72.33.98:8096"
+JELLYFIN_USERNAME="matt"
+OVERWRITE_EXISTING="true"
 
 require_command() {
 	if ! command -v "$1" >/dev/null 2>&1; then
@@ -22,14 +24,8 @@ prompt_config() {
 		exit 1
 	fi
 
-	read -r -p "Jellyfin username (blank = first user for this key): " JELLYFIN_USERNAME
-
-	read -r -p "Overwrite existing playlists with same name? [Y/n]: " overwrite_choice
-	if [[ "${overwrite_choice}" =~ ^[Nn]$ ]]; then
-		OVERWRITE_EXISTING="false"
-	else
-		OVERWRITE_EXISTING="true"
-	fi
+    echo "Using Jellyfin username: ${JELLYFIN_USERNAME}"
+    echo "Overwrite existing playlists: yes"
 }
 
 validate_exports() {
@@ -398,6 +394,11 @@ for m3u_file in m3u_files:
         + (f", suffix-matched {matched_by_suffix}" if matched_by_suffix else "")
         + (f", basename-matched {matched_by_basename}" if matched_by_basename else "")
     )
+
+    if missing:
+        print(f"[MISSING] {playlist_name}:")
+        for missing_path in missing:
+            print(f"  - {missing_path}")
 
 print()
 print("Import complete.")
