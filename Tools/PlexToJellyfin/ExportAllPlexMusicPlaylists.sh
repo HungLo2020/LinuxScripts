@@ -55,9 +55,10 @@ plex_api_get() {
 		args+=(--data-urlencode "$param")
 	done
 
-	args+=(--data-urlencode "X-Plex-Token=${PLEX_TOKEN}")
-
-	curl -fsSLG "${args[@]}" "${PLEX_URL}${path}"
+	curl -fsSLG \
+		-H "X-Plex-Token: ${PLEX_TOKEN}" \
+		"${args[@]}" \
+		"${PLEX_URL}${path}"
 }
 
 plex_api_get_to_file() {
@@ -71,9 +72,11 @@ plex_api_get_to_file() {
 		args+=(--data-urlencode "$param")
 	done
 
-	args+=(--data-urlencode "X-Plex-Token=${PLEX_TOKEN}")
-
-	curl -fsSLG "${args[@]}" "${PLEX_URL}${path}" -o "${output_file}"
+	curl -fsSLG \
+		-H "X-Plex-Token: ${PLEX_TOKEN}" \
+		"${args[@]}" \
+		"${PLEX_URL}${path}" \
+		-o "${output_file}"
 }
 
 parse_playlists_to_tsv() {
@@ -140,7 +143,11 @@ main() {
 	if ! playlist_xml="$(fetch_audio_playlists_xml 2>/tmp/plex_export_error.log)"; then
 		if grep -q '401' /tmp/plex_export_error.log 2>/dev/null; then
 			echo "Error: Plex returned 401 Unauthorized."
-			echo "Check your X-Plex-Token and make sure there are no extra spaces when pasting."
+			echo "Check your X-Plex-Token and make sure it is a server-valid token."
+			echo
+			echo "Quick token test command:"
+			echo "curl -s -H 'X-Plex-Token: YOUR_TOKEN' '${PLEX_URL}/identity'"
+			echo "If token works, output should include '<MediaContainer ...>'."
 		else
 			echo "Error: failed to contact Plex at ${PLEX_URL}."
 			cat /tmp/plex_export_error.log
