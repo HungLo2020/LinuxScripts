@@ -2,6 +2,8 @@
 
 set -euo pipefail
 
+PLEX_URL="http://localhost:32400"
+
 require_command() {
 	if ! command -v "$1" >/dev/null 2>&1; then
 		echo "Error: required command '$1' not found in PATH."
@@ -18,12 +20,7 @@ sanitize_filename() {
 }
 
 prompt_defaults() {
-	local default_url="http://localhost:32400"
-	read -r -p "Plex URL [${default_url}]: " PLEX_URL
-	if [[ -z "${PLEX_URL}" ]]; then
-		PLEX_URL="${default_url}"
-	fi
-	PLEX_URL="${PLEX_URL%/}"
+	echo "Using Plex URL: ${PLEX_URL}"
 
 	read -r -p "Plex token (X-Plex-Token): " PLEX_TOKEN
 	if [[ -z "${PLEX_TOKEN}" ]]; then
