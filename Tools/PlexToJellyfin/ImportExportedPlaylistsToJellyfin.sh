@@ -103,7 +103,15 @@ def request_json(method: str, path: str, query: dict | None = None, body: dict |
 
 
 def normalize_path(path: str) -> str:
-    return path.strip().rstrip("/").replace("\\", "/")
+    value = path.strip()
+    if value.lower().startswith("file://localhost/"):
+        value = "/" + value[len("file://localhost/"):]
+    elif value.lower().startswith("file:///"):
+        value = "/" + value[len("file:///"):]
+    elif value.lower().startswith("file://"):
+        value = value[len("file://"):]
+    value = urllib.parse.unquote(value)
+    return value.rstrip("/").replace("\\", "/")
 
 
 def music_relative_key(path: str) -> str:
@@ -114,6 +122,15 @@ def music_relative_key(path: str) -> str:
     if idx == -1:
         return ""
     return normalized[idx + len(marker):].lstrip("/").lower()
+
+
+def suffix_key(path: str, parts: int = 4) -> str:
+    normalized = normalize_path(path)
+    chunks = [c for c in normalized.split("/") if c]
+    if not chunks:
+        return ""
+    tail = chunks[-parts:] if len(chunks) >= parts else chunks
+    return "/".join(tail).lower()
 
 
 def get_me():
@@ -179,6 +196,8 @@ def build_audio_path_indexes(user_id: str):
     audio_items = paged_items(user_id, "Audio", "Path")
     exact_index = {}
     relative_index = {}
+    suffix_index = {}
+    suffix_counts = {}
     for item in audio_items:
         item_id = item.get("Id")
         item_path = item.get("Path")
@@ -189,7 +208,12 @@ def build_audio_path_indexes(user_id: str):
         rel_key = music_relative_key(normalized)
         if rel_key and rel_key not in relative_index:
             relative_index[rel_key] = item_id
-    return exact_index, relative_index
+        sfx = suffix_key(normalized, parts=4)
+        if sfx:
+            suffix_counts[sfx] = suffix_counts.get(sfx, 0) + 1
+            if sfx not in suffix_index:
+                suffix_index[sfx] = item_id
+    return exact_index, relative_index, suffix_index, suffix_counts
 
 
 def get_existing_playlists_by_name(user_id: str):
@@ -262,9 +286,10 @@ if username and user_name.lower() != username.lower():
 
 print(f"Using Jellyfin user: {user_name} ({user_id})")
 print("Indexing Jellyfin audio items by path...")
-audio_index, audio_relative_index = build_audio_path_indexes(user_id)
+audio_index, audio_relative_index, audio_suffix_index, audio_suffix_counts = build_audio_path_indexes(user_id)
 print(f"Indexed audio items (exact): {len(audio_index)}")
 print(f"Indexed audio items (relative /Music/): {len(audio_relative_index)}")
+print(f"Indexed audio items (suffix-4): {len(audio_suffix_index)}")
 
 existing_playlists = get_existing_playlists_by_name(user_id)
 
@@ -277,6 +302,7 @@ imported = 0
 skipped = 0
 missing_total = 0
 matched_by_relative_total = 0
+matched_by_suffix_total = 0
 
 for m3u_file in m3u_files:
     playlist_name = m3u_file.stem
@@ -290,6 +316,7 @@ for m3u_file in m3u_files:
     resolved_ids = []
     missing = []
     matched_by_relative = 0
+    matched_by_suffix = 0
     for p in paths:
         item_id = audio_index.get(p)
         if not item_id:
@@ -298,6 +325,12 @@ for m3u_file in m3u_files:
                 item_id = audio_relative_index.get(rel_key)
                 if item_id:
                     matched_by_relative += 1
+        if not item_id:
+            sfx = suffix_key(p, parts=4)
+            if sfx and audio_suffix_counts.get(sfx, 0) == 1:
+                item_id = audio_suffix_index.get(sfx)
+                if item_id:
+                    matched_by_suffix += 1
         if item_id:
             resolved_ids.append(item_id)
         else:
@@ -305,6 +338,7 @@ for m3u_file in m3u_files:
 
     missing_total += len(missing)
     matched_by_relative_total += matched_by_relative
+    matched_by_suffix_total += matched_by_suffix
 
     if not resolved_ids:
         print(f"[SKIP] {playlist_name}: 0 matched tracks, {len(missing)} missing")
@@ -336,6 +370,7 @@ for m3u_file in m3u_files:
         f"[OK]   {playlist_name}: imported {len(resolved_ids)} tracks"
         + (f", missing {len(missing)}" if missing else "")
         + (f", fallback-matched {matched_by_relative}" if matched_by_relative else "")
+        + (f", suffix-matched {matched_by_suffix}" if matched_by_suffix else "")
     )
 
 print()
@@ -344,6 +379,7 @@ print(f"  Imported playlists : {imported}")
 print(f"  Skipped playlists  : {skipped}")
 print(f"  Missing tracks     : {missing_total}")
 print(f"  Fallback matched   : {matched_by_relative_total}")
+print(f"  Suffix matched     : {matched_by_suffix_total}")
 PY
 }
 
