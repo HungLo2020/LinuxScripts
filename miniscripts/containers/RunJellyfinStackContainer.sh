@@ -58,6 +58,7 @@ ENV_TEMPLATE="${RESOURCE_DIR}/.env.example"
 STACK_ROOT="${HOME}/.jellyfin-stack"
 STACK_COMPOSE_FILE="${STACK_ROOT}/docker-compose.yml"
 STACK_ENV_FILE="${STACK_ROOT}/.env"
+STACK_MEDIA_PATHS_FILE="${STACK_ROOT}/media-paths.txt"
 
 DOCKER_USE_SUDO="false"
 docker_exec() {
@@ -175,6 +176,110 @@ prompt_absolute_existing_dir() {
     echo "${path}"
     return 0
   done
+}
+
+load_saved_media_paths() {
+  if [[ ! -f "${STACK_MEDIA_PATHS_FILE}" ]]; then
+    return 1
+  fi
+
+  local saved_media saved_music saved_downloads
+  saved_media="$(sed -n 's/^MEDIA_PATH=//p' "${STACK_MEDIA_PATHS_FILE}" | head -n1)"
+  saved_music="$(sed -n 's/^MUSIC_PATH=//p' "${STACK_MEDIA_PATHS_FILE}" | head -n1)"
+  saved_downloads="$(sed -n 's/^DOWNLOADS_PATH=//p' "${STACK_MEDIA_PATHS_FILE}" | head -n1)"
+
+  if [[ -z "${saved_media}" || -z "${saved_music}" || -z "${saved_downloads}" ]]; then
+    return 1
+  fi
+
+  if [[ "${saved_media}" != /* || "${saved_music}" != /* || "${saved_downloads}" != /* ]]; then
+    return 1
+  fi
+
+  SAVED_MEDIA_PATH="${saved_media}"
+  SAVED_MUSIC_PATH="${saved_music}"
+  SAVED_DOWNLOADS_PATH="${saved_downloads}"
+  return 0
+}
+
+save_media_paths() {
+  local media_path="$1"
+  local music_path="$2"
+  local downloads_path="$3"
+
+  mkdir -p "${STACK_ROOT}"
+  cat > "${STACK_MEDIA_PATHS_FILE}" <<EOF
+MEDIA_PATH=${media_path}
+MUSIC_PATH=${music_path}
+DOWNLOADS_PATH=${downloads_path}
+EOF
+}
+
+prompt_for_media_paths() {
+  local media_path=""
+  local music_path=""
+  local downloads_path=""
+  local choice=""
+
+  if load_saved_media_paths; then
+    echo "Saved media path config found: ${STACK_MEDIA_PATHS_FILE}"
+    echo "  MEDIA_PATH=${SAVED_MEDIA_PATH}"
+    echo "  MUSIC_PATH=${SAVED_MUSIC_PATH}"
+    echo "  DOWNLOADS_PATH=${SAVED_DOWNLOADS_PATH}"
+    echo
+    read -r -p "Use existing saved paths? [Y/n]: " choice
+    if [[ ! "${choice}" =~ ^[Nn]$ ]]; then
+      media_path="${SAVED_MEDIA_PATH}"
+      music_path="${SAVED_MUSIC_PATH}"
+      downloads_path="${SAVED_DOWNLOADS_PATH}"
+
+      if [[ ! -d "${media_path}" ]]; then
+        echo "Error: saved MEDIA_PATH no longer exists: ${media_path}"
+        return 1
+      fi
+
+      if [[ ! -d "${music_path}" ]]; then
+        echo "Error: saved MUSIC_PATH no longer exists: ${music_path}"
+        return 1
+      fi
+
+      mkdir -p "${downloads_path}"
+
+      PROMPTED_MEDIA_PATH="${media_path}"
+      PROMPTED_MUSIC_PATH="${music_path}"
+      PROMPTED_DOWNLOADS_PATH="${downloads_path}"
+      return 0
+    fi
+  fi
+
+  log "Paste the absolute path to your existing media root directory."
+  media_path="$(prompt_absolute_existing_dir 'Media path: ')"
+  if [[ "${media_path}" != "/" ]]; then
+    media_path="${media_path%/}"
+  fi
+
+  log "Paste a second absolute library path (tip: use your music directory)."
+  music_path="$(prompt_absolute_existing_dir 'Second library path (music): ')"
+  if [[ "${music_path}" != "/" ]]; then
+    music_path="${music_path%/}"
+  fi
+
+  read -r -p "Downloads path (Enter for ${media_path}/downloads): " downloads_path
+  if [[ -z "${downloads_path}" ]]; then
+    downloads_path="${media_path}/downloads"
+  fi
+
+  if [[ "${downloads_path}" != /* ]]; then
+    echo "Error: downloads path must be absolute."
+    return 1
+  fi
+
+  mkdir -p "${downloads_path}"
+  save_media_paths "${media_path}" "${music_path}" "${downloads_path}"
+
+  PROMPTED_MEDIA_PATH="${media_path}"
+  PROMPTED_MUSIC_PATH="${music_path}"
+  PROMPTED_DOWNLOADS_PATH="${downloads_path}"
 }
 
 bitwarden_status() {
@@ -475,28 +580,10 @@ case "${ACTION}" in
     ;;
 
   run)
-    log "Paste the absolute path to your existing media root directory."
-    media_path="$(prompt_absolute_existing_dir 'Media path: ')"
-    if [[ "${media_path}" != "/" ]]; then
-      media_path="${media_path%/}"
-    fi
-
-    log "Paste a second absolute library path (tip: use your music directory)."
-    music_path="$(prompt_absolute_existing_dir 'Second library path (music): ')"
-    if [[ "${music_path}" != "/" ]]; then
-      music_path="${music_path%/}"
-    fi
-
-    read -r -p "Downloads path (Enter for ${media_path}/downloads): " downloads_path
-    if [[ -z "${downloads_path}" ]]; then
-      downloads_path="${media_path}/downloads"
-    fi
-
-    if [[ "${downloads_path}" != /* ]]; then
-      echo "Error: downloads path must be absolute."
-      exit 1
-    fi
-    mkdir -p "${downloads_path}"
+    prompt_for_media_paths
+    media_path="${PROMPTED_MEDIA_PATH}"
+    music_path="${PROMPTED_MUSIC_PATH}"
+    downloads_path="${PROMPTED_DOWNLOADS_PATH}"
 
     if try_bitwarden_protonvpn_credentials; then
       proton_user="$PROTONVPN_USER_FROM_BW"
