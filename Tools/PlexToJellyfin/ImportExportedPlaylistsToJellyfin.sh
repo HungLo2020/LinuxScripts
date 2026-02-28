@@ -4,6 +4,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 EXPORT_DIR="${SCRIPT_DIR}/exports"
+JELLYFIN_URL="http://100.72.33.98:8096"
 
 require_command() {
 	if ! command -v "$1" >/dev/null 2>&1; then
@@ -13,13 +14,7 @@ require_command() {
 }
 
 prompt_config() {
-	local default_url="http://localhost:8096"
-
-	read -r -p "Jellyfin URL [${default_url}]: " JELLYFIN_URL
-	if [[ -z "${JELLYFIN_URL}" ]]; then
-		JELLYFIN_URL="${default_url}"
-	fi
-	JELLYFIN_URL="${JELLYFIN_URL%/}"
+    echo "Using Jellyfin URL: ${JELLYFIN_URL}"
 
 	read -r -p "Jellyfin API key: " JELLYFIN_API_KEY
 	if [[ -z "${JELLYFIN_API_KEY}" ]]; then
