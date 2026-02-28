@@ -49,6 +49,7 @@ run_import() {
 	python3 - <<'PY'
 import json
 import os
+import re
 import sys
 import urllib.parse
 import urllib.request
@@ -137,6 +138,33 @@ def basename_key(path: str) -> str:
     return chunks[-1].lower()
 
 
+def normalize_token(value: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "", value.lower())
+
+
+def artist_filename_key(path: str) -> str:
+    normalized = normalize_path(path)
+    chunks = [c for c in normalized.split("/") if c]
+    if len(chunks) < 2:
+        return ""
+
+    artist = ""
+    for i, chunk in enumerate(chunks):
+        if chunk.lower() == "artists" and (i + 1) < len(chunks):
+            artist = chunks[i + 1]
+            break
+
+    if not artist:
+        return ""
+
+    filename = chunks[-1]
+    artist_norm = normalize_token(artist)
+    filename_norm = normalize_token(filename)
+    if not artist_norm or not filename_norm:
+        return ""
+    return f"{artist_norm}|{filename_norm}"
+
+
 def get_me():
     return request_json("GET", "/Users/Me")
 
@@ -202,6 +230,8 @@ def build_audio_path_indexes(user_id: str):
     relative_index = {}
     suffix_index = {}
     suffix_counts = {}
+    artist_file_index = {}
+    artist_file_counts = {}
     basename_index = {}
     basename_counts = {}
     for item in audio_items:
@@ -219,12 +249,26 @@ def build_audio_path_indexes(user_id: str):
             suffix_counts[sfx] = suffix_counts.get(sfx, 0) + 1
             if sfx not in suffix_index:
                 suffix_index[sfx] = item_id
+        af_key = artist_filename_key(normalized)
+        if af_key:
+            artist_file_counts[af_key] = artist_file_counts.get(af_key, 0) + 1
+            if af_key not in artist_file_index:
+                artist_file_index[af_key] = item_id
         bname = basename_key(normalized)
         if bname:
             basename_counts[bname] = basename_counts.get(bname, 0) + 1
             if bname not in basename_index:
                 basename_index[bname] = item_id
-    return exact_index, relative_index, suffix_index, suffix_counts, basename_index, basename_counts
+    return (
+        exact_index,
+        relative_index,
+        suffix_index,
+        suffix_counts,
+        artist_file_index,
+        artist_file_counts,
+        basename_index,
+        basename_counts,
+    )
 
 
 def get_existing_playlists_by_name(user_id: str):
@@ -297,10 +341,11 @@ if username and user_name.lower() != username.lower():
 
 print(f"Using Jellyfin user: {user_name} ({user_id})")
 print("Indexing Jellyfin audio items by path...")
-audio_index, audio_relative_index, audio_suffix_index, audio_suffix_counts, audio_basename_index, audio_basename_counts = build_audio_path_indexes(user_id)
+audio_index, audio_relative_index, audio_suffix_index, audio_suffix_counts, audio_artist_file_index, audio_artist_file_counts, audio_basename_index, audio_basename_counts = build_audio_path_indexes(user_id)
 print(f"Indexed audio items (exact): {len(audio_index)}")
 print(f"Indexed audio items (relative /Music/): {len(audio_relative_index)}")
 print(f"Indexed audio items (suffix-4): {len(audio_suffix_index)}")
+print(f"Indexed audio items (artist+filename): {len(audio_artist_file_index)}")
 print(f"Indexed audio items (basename): {len(audio_basename_index)}")
 
 existing_playlists = get_existing_playlists_by_name(user_id)
@@ -315,6 +360,7 @@ skipped = 0
 missing_total = 0
 matched_by_relative_total = 0
 matched_by_suffix_total = 0
+matched_by_artist_file_total = 0
 matched_by_basename_total = 0
 
 for m3u_file in m3u_files:
@@ -330,6 +376,7 @@ for m3u_file in m3u_files:
     missing = []
     matched_by_relative = 0
     matched_by_suffix = 0
+    matched_by_artist_file = 0
     matched_by_basename = 0
     for p in paths:
         item_id = audio_index.get(p)
@@ -346,6 +393,12 @@ for m3u_file in m3u_files:
                 if item_id:
                     matched_by_suffix += 1
         if not item_id:
+            af_key = artist_filename_key(p)
+            if af_key and audio_artist_file_counts.get(af_key, 0) == 1:
+                item_id = audio_artist_file_index.get(af_key)
+                if item_id:
+                    matched_by_artist_file += 1
+        if not item_id:
             bname = basename_key(p)
             if bname and audio_basename_counts.get(bname, 0) == 1:
                 item_id = audio_basename_index.get(bname)
@@ -359,6 +412,7 @@ for m3u_file in m3u_files:
     missing_total += len(missing)
     matched_by_relative_total += matched_by_relative
     matched_by_suffix_total += matched_by_suffix
+    matched_by_artist_file_total += matched_by_artist_file
     matched_by_basename_total += matched_by_basename
 
     if not resolved_ids:
@@ -392,6 +446,7 @@ for m3u_file in m3u_files:
         + (f", missing {len(missing)}" if missing else "")
         + (f", fallback-matched {matched_by_relative}" if matched_by_relative else "")
         + (f", suffix-matched {matched_by_suffix}" if matched_by_suffix else "")
+        + (f", artist+filename-matched {matched_by_artist_file}" if matched_by_artist_file else "")
         + (f", basename-matched {matched_by_basename}" if matched_by_basename else "")
     )
 
@@ -407,6 +462,7 @@ print(f"  Skipped playlists  : {skipped}")
 print(f"  Missing tracks     : {missing_total}")
 print(f"  Fallback matched   : {matched_by_relative_total}")
 print(f"  Suffix matched     : {matched_by_suffix_total}")
+print(f"  Artist+file matched: {matched_by_artist_file_total}")
 print(f"  Basename matched   : {matched_by_basename_total}")
 PY
 }
