@@ -40,7 +40,42 @@ prompt_defaults() {
 }
 
 fetch_audio_playlists_xml() {
-	curl -fsSL "${PLEX_URL}/playlists?playlistType=audio&X-Plex-Token=${PLEX_TOKEN}"
+	plex_api_get "/playlists" "playlistType=audio"
+}
+
+fetch_all_playlists_xml() {
+	plex_api_get "/playlists"
+}
+
+plex_api_get() {
+	local path="$1"
+	shift || true
+
+	local args=()
+	local param
+	for param in "$@"; do
+		args+=(--data-urlencode "$param")
+	done
+
+	args+=(--data-urlencode "X-Plex-Token=${PLEX_TOKEN}")
+
+	curl -fsSLG "${args[@]}" "${PLEX_URL}${path}"
+}
+
+plex_api_get_to_file() {
+	local path="$1"
+	local output_file="$2"
+	shift 2 || true
+
+	local args=()
+	local param
+	for param in "$@"; do
+		args+=(--data-urlencode "$param")
+	done
+
+	args+=(--data-urlencode "X-Plex-Token=${PLEX_TOKEN}")
+
+	curl -fsSLG "${args[@]}" "${PLEX_URL}${path}" -o "${output_file}"
 }
 
 parse_playlists_to_tsv() {
@@ -115,7 +150,13 @@ main() {
 	fi
 
 	if [[ -z "${playlist_tsv}" ]]; then
-		echo "No Plex audio playlists found."
+		echo "No playlists returned by audio filter; retrying with all playlists endpoint..."
+		playlist_xml="$(fetch_all_playlists_xml)"
+		playlist_tsv="$(printf '%s' "${playlist_xml}" | parse_playlists_to_tsv)"
+	fi
+
+	if [[ -z "${playlist_tsv}" ]]; then
+		echo "No Plex playlists found."
 		echo "Done."
 		exit 0
 	fi
@@ -123,6 +164,7 @@ main() {
 	local total=0
 	local succeeded=0
 	local failed=0
+	local skipped_non_audio=0
 
 	echo "Exporting playlists to ${OUTPUT_DIR} ..."
 	while IFS=$'\t' read -r rating_key title; do
@@ -137,7 +179,7 @@ main() {
 		xml_file="${OUTPUT_DIR}/${safe_title}.xml"
 		m3u_file="${OUTPUT_DIR}/${safe_title}.m3u"
 
-		if ! curl -fsSL "${PLEX_URL}/playlists/${rating_key}/items?X-Plex-Token=${PLEX_TOKEN}" -o "${xml_file}"; then
+		if ! plex_api_get_to_file "/playlists/${rating_key}/items" "${xml_file}"; then
 			echo "[FAIL] ${title} (key=${rating_key}) - could not fetch items"
 			failed=$((failed + 1))
 			continue
@@ -150,6 +192,13 @@ main() {
 			continue
 		fi
 
+		if (( track_count == 0 )); then
+			echo "[SKIP] ${title} (key=${rating_key}) - contains no audio tracks"
+			skipped_non_audio=$((skipped_non_audio + 1))
+			rm -f "${m3u_file}"
+			continue
+		fi
+
 		echo "[OK]   ${title} -> ${safe_title}.m3u (${track_count} tracks)"
 		succeeded=$((succeeded + 1))
 	done <<<"${playlist_tsv}"
@@ -159,6 +208,7 @@ main() {
 	echo "  Total playlists found : ${total}"
 	echo "  Successfully exported : ${succeeded}"
 	echo "  Failed                : ${failed}"
+	echo "  Skipped (no audio)    : ${skipped_non_audio}"
 	echo "  Output directory      : ${OUTPUT_DIR}"
 }
 
