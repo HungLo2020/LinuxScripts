@@ -149,10 +149,20 @@ def artist_filename_key(path: str) -> str:
         return ""
 
     artist = ""
-    for i, chunk in enumerate(chunks):
-        if chunk.lower() == "artists" and (i + 1) < len(chunks):
-            artist = chunks[i + 1]
-            break
+    lower_chunks = [c.lower() for c in chunks]
+
+    if "music" in lower_chunks:
+        music_idx = lower_chunks.index("music")
+        if music_idx + 1 < len(chunks):
+            candidate = chunks[music_idx + 1]
+            if candidate.lower() == "artists" and music_idx + 2 < len(chunks):
+                artist = chunks[music_idx + 2]
+            else:
+                artist = candidate
+    elif "artists" in lower_chunks:
+        artists_idx = lower_chunks.index("artists")
+        if artists_idx + 1 < len(chunks):
+            artist = chunks[artists_idx + 1]
 
     if not artist:
         return ""
