@@ -80,26 +80,26 @@ plex_api_get_to_file() {
 }
 
 parse_playlists_to_tsv() {
-	python3 - <<'PY'
+	python3 -c '
 import sys
 import xml.etree.ElementTree as ET
 
 xml_data = sys.stdin.read()
 if not xml_data.strip():
-    sys.exit(0)
+	sys.exit(0)
 
 try:
-    root = ET.fromstring(xml_data)
+	root = ET.fromstring(xml_data)
 except ET.ParseError as exc:
-    print(f"ERROR\tPARSE\t{exc}")
-    sys.exit(2)
+	print(f"ERROR\tPARSE\t{exc}")
+	sys.exit(2)
 
-for playlist in root.findall('.//Playlist'):
-    key = playlist.get('ratingKey', '').strip()
-    title = playlist.get('title', '').strip() or 'Untitled Playlist'
-    if key:
-        print(f"{key}\t{title}")
-PY
+for playlist in root.findall(".//Playlist"):
+	key = playlist.get("ratingKey", "").strip()
+	title = playlist.get("title", "").strip() or "Untitled Playlist"
+	if key:
+		print(f"{key}\t{title}")
+'
 }
 
 write_m3u_from_xml() {
