@@ -23,6 +23,7 @@ prompt_defaults() {
 	echo "Using Plex URL: ${PLEX_URL}"
 
 	read -r -p "Plex token (X-Plex-Token): " PLEX_TOKEN
+	PLEX_TOKEN="$(printf '%s' "${PLEX_TOKEN}" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
 	if [[ -z "${PLEX_TOKEN}" ]]; then
 		echo "Error: Plex token cannot be empty."
 		exit 1
@@ -136,7 +137,18 @@ main() {
 	mkdir -p "${OUTPUT_DIR}"
 
 	echo "Fetching Plex audio playlists from ${PLEX_URL} ..."
-	playlist_xml="$(fetch_audio_playlists_xml)"
+	if ! playlist_xml="$(fetch_audio_playlists_xml 2>/tmp/plex_export_error.log)"; then
+		if grep -q '401' /tmp/plex_export_error.log 2>/dev/null; then
+			echo "Error: Plex returned 401 Unauthorized."
+			echo "Check your X-Plex-Token and make sure there are no extra spaces when pasting."
+		else
+			echo "Error: failed to contact Plex at ${PLEX_URL}."
+			cat /tmp/plex_export_error.log
+		fi
+		rm -f /tmp/plex_export_error.log
+		exit 1
+	fi
+	rm -f /tmp/plex_export_error.log
 
 	playlist_tsv="$(printf '%s' "${playlist_xml}" | parse_playlists_to_tsv)"
 
