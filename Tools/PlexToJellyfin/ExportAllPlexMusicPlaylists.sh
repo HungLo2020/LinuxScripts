@@ -3,6 +3,8 @@
 set -euo pipefail
 
 PLEX_URL="http://localhost:32400"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+OUTPUT_DIR="${SCRIPT_DIR}/exports"
 
 require_command() {
 	if ! command -v "$1" >/dev/null 2>&1; then
@@ -29,12 +31,7 @@ prompt_defaults() {
 		exit 1
 	fi
 
-	local default_output
-	default_output="${PWD}/plex-playlists-export-$(date +%F-%H%M%S)"
-	read -r -p "Output directory [${default_output}]: " OUTPUT_DIR
-	if [[ -z "${OUTPUT_DIR}" ]]; then
-		OUTPUT_DIR="${default_output}"
-	fi
+	echo "Export directory: ${OUTPUT_DIR}"
 }
 
 fetch_audio_playlists_xml() {
@@ -138,6 +135,7 @@ main() {
 
 	prompt_defaults
 	mkdir -p "${OUTPUT_DIR}"
+	rm -f "${OUTPUT_DIR}"/*.xml "${OUTPUT_DIR}"/*.m3u 2>/dev/null || true
 
 	echo "Fetching Plex audio playlists from ${PLEX_URL} ..."
 	if ! playlist_xml="$(fetch_audio_playlists_xml 2>/tmp/plex_export_error.log)"; then
