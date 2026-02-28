@@ -67,6 +67,7 @@ export_dir = Path(os.environ["EXPORT_DIR"])
 headers = {
     "X-Emby-Token": api_key,
     "X-MediaBrowser-Token": api_key,
+    "Authorization": f'MediaBrowser Token="{api_key}"',
     "Accept": "application/json",
     "Content-Type": "application/json",
 }
@@ -74,7 +75,6 @@ headers = {
 
 def request_json(method: str, path: str, query: dict | None = None, body: dict | None = None):
     query = query or {}
-    query["api_key"] = api_key
     query_string = urllib.parse.urlencode(query, doseq=True)
     url = f"{base_url}{path}"
     if query_string:
@@ -108,6 +108,33 @@ def normalize_path(path: str) -> str:
 
 def get_me():
     return request_json("GET", "/Users/Me")
+
+
+def get_users():
+    return request_json("GET", "/Users")
+
+
+def resolve_user():
+    try:
+        me = get_me()
+        if me.get("Id"):
+            return me
+    except RuntimeError as exc:
+        message = str(exc)
+        if "HTTP 400" not in message and "HTTP 404" not in message and "HTTP 405" not in message:
+            raise
+
+    users = get_users()
+    if not users:
+        raise RuntimeError("No Jellyfin users returned by API.")
+
+    if username:
+        for user in users:
+            if user.get("Name", "").lower() == username.lower():
+                return user
+        raise RuntimeError(f"User '{username}' not found.")
+
+    return users[0]
 
 
 def paged_items(user_id: str, include_item_types: str, fields: str):
@@ -206,7 +233,7 @@ def parse_m3u_paths(path: Path):
     return entries
 
 
-user = get_me()
+user = resolve_user()
 user_id = user.get("Id")
 user_name = user.get("Name", "unknown")
 
