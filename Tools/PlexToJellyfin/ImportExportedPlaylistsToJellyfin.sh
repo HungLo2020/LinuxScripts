@@ -103,7 +103,17 @@ def request_json(method: str, path: str, query: dict | None = None, body: dict |
 
 
 def normalize_path(path: str) -> str:
-    return path.strip().rstrip("/")
+    return path.strip().rstrip("/").replace("\\", "/")
+
+
+def music_relative_key(path: str) -> str:
+    normalized = normalize_path(path)
+    lower = normalized.lower()
+    marker = "/music/"
+    idx = lower.find(marker)
+    if idx == -1:
+        return ""
+    return normalized[idx + len(marker):].lstrip("/").lower()
 
 
 def get_me():
@@ -165,16 +175,21 @@ def paged_items(user_id: str, include_item_types: str, fields: str):
     return all_items
 
 
-def build_audio_path_index(user_id: str):
+def build_audio_path_indexes(user_id: str):
     audio_items = paged_items(user_id, "Audio", "Path")
-    index = {}
+    exact_index = {}
+    relative_index = {}
     for item in audio_items:
         item_id = item.get("Id")
         item_path = item.get("Path")
         if not item_id or not item_path:
             continue
-        index[normalize_path(item_path)] = item_id
-    return index
+        normalized = normalize_path(item_path)
+        exact_index[normalized] = item_id
+        rel_key = music_relative_key(normalized)
+        if rel_key and rel_key not in relative_index:
+            relative_index[rel_key] = item_id
+    return exact_index, relative_index
 
 
 def get_existing_playlists_by_name(user_id: str):
@@ -246,9 +261,10 @@ if username and user_name.lower() != username.lower():
     )
 
 print(f"Using Jellyfin user: {user_name} ({user_id})")
-print("Indexing Jellyfin audio items by full path...")
-audio_index = build_audio_path_index(user_id)
-print(f"Indexed audio items: {len(audio_index)}")
+print("Indexing Jellyfin audio items by path...")
+audio_index, audio_relative_index = build_audio_path_indexes(user_id)
+print(f"Indexed audio items (exact): {len(audio_index)}")
+print(f"Indexed audio items (relative /Music/): {len(audio_relative_index)}")
 
 existing_playlists = get_existing_playlists_by_name(user_id)
 
@@ -260,6 +276,7 @@ if not m3u_files:
 imported = 0
 skipped = 0
 missing_total = 0
+matched_by_relative_total = 0
 
 for m3u_file in m3u_files:
     playlist_name = m3u_file.stem
@@ -272,14 +289,22 @@ for m3u_file in m3u_files:
 
     resolved_ids = []
     missing = []
+    matched_by_relative = 0
     for p in paths:
         item_id = audio_index.get(p)
+        if not item_id:
+            rel_key = music_relative_key(p)
+            if rel_key:
+                item_id = audio_relative_index.get(rel_key)
+                if item_id:
+                    matched_by_relative += 1
         if item_id:
             resolved_ids.append(item_id)
         else:
             missing.append(p)
 
     missing_total += len(missing)
+    matched_by_relative_total += matched_by_relative
 
     if not resolved_ids:
         print(f"[SKIP] {playlist_name}: 0 matched tracks, {len(missing)} missing")
@@ -310,6 +335,7 @@ for m3u_file in m3u_files:
     print(
         f"[OK]   {playlist_name}: imported {len(resolved_ids)} tracks"
         + (f", missing {len(missing)}" if missing else "")
+        + (f", fallback-matched {matched_by_relative}" if matched_by_relative else "")
     )
 
 print()
@@ -317,6 +343,7 @@ print("Import complete.")
 print(f"  Imported playlists : {imported}")
 print(f"  Skipped playlists  : {skipped}")
 print(f"  Missing tracks     : {missing_total}")
+print(f"  Fallback matched   : {matched_by_relative_total}")
 PY
 }
 
