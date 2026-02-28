@@ -66,6 +66,7 @@ export_dir = Path(os.environ["EXPORT_DIR"])
 
 headers = {
     "X-Emby-Token": api_key,
+    "X-MediaBrowser-Token": api_key,
     "Accept": "application/json",
     "Content-Type": "application/json",
 }
@@ -73,6 +74,7 @@ headers = {
 
 def request_json(method: str, path: str, query: dict | None = None, body: dict | None = None):
     query = query or {}
+    query["api_key"] = api_key
     query_string = urllib.parse.urlencode(query, doseq=True)
     url = f"{base_url}{path}"
     if query_string:
@@ -91,6 +93,12 @@ def request_json(method: str, path: str, query: dict | None = None, body: dict |
             return json.loads(content.decode("utf-8"))
     except urllib.error.HTTPError as exc:
         details = exc.read().decode("utf-8", errors="ignore")
+        if exc.code == 401:
+            raise RuntimeError(
+                f"HTTP 401 Unauthorized for {method} {url}\n"
+                "Your Jellyfin API key is invalid for this server/user, or has insufficient scope.\n"
+                "Generate a fresh API key from Jellyfin Dashboard -> API Keys and try again."
+            ) from exc
         raise RuntimeError(f"HTTP {exc.code} for {method} {url}\n{details}") from exc
 
 
