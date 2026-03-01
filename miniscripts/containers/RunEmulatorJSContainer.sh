@@ -254,7 +254,7 @@ log "Creating and starting ${CONTAINER_NAME} container..."
 port_in_use() {
     local p="$1"
     if command -v ss >/dev/null 2>&1; then
-        ss -ltn | awk '{print $4}' | grep -E ":${p}$|:${p} \" >/dev/null 2>&1 && return 0 || return 1
+        ss -ltn | awk '{print $4}' | grep -E ":${p}$" >/dev/null 2>&1 && return 0 || return 1
     fi
     if command -v lsof >/dev/null 2>&1; then
         lsof -iTCP -sTCP:LISTEN -P -n | grep -q ":${p}" && return 0 || return 1
