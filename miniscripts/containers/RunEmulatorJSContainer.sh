@@ -29,7 +29,8 @@ BASE_DATA_DIR="${HOME}/.emulatorjs"
 # locations.
 ROMS_DIR="/srv/storage/OneDrive/Apps/Games/Emulators/Roms"
 SAVES_DIR="/srv/storage/OneDrive/Apps/Games/Emulators/Saves"
-PORT=8080
+# Allow overriding host port via env var `EMULATORJS_PORT`.
+PORT="${EMULATORJS_PORT:-8080}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="${SCRIPT_DIR}"
@@ -248,6 +249,29 @@ if container_exists "${CONTAINER_NAME}"; then
 fi
 
 log "Creating and starting ${CONTAINER_NAME} container..."
+
+# Verify the host port is available before attempting to create the container.
+port_in_use() {
+    local p="$1"
+    if command -v ss >/dev/null 2>&1; then
+        ss -ltn | awk '{print $4}' | grep -E ":${p}$|:${p} \" >/dev/null 2>&1 && return 0 || return 1
+    fi
+    if command -v lsof >/dev/null 2>&1; then
+        lsof -iTCP -sTCP:LISTEN -P -n | grep -q ":${p}" && return 0 || return 1
+    fi
+    if command -v netstat >/dev/null 2>&1; then
+        netstat -ltn | awk '{print $4}' | grep -E ":${p}$" >/dev/null 2>&1 && return 0 || return 1
+    fi
+    return 1
+}
+
+if port_in_use "${PORT}"; then
+    log "Error: host port ${PORT} is already in use."
+    log "To inspect which process is using it run: sudo lsof -iTCP -sTCP:LISTEN -P -n | grep :${PORT}"
+    log "If a Docker container bound the port, check: sudo docker ps --format '{{.Names}}\t{{.Ports}}' | grep :${PORT}" 
+    log "To use a different port, run: EMULATORJS_PORT=9090 ./miniscripts/containers/RunEmulatorJSContainer.sh"
+    exit 1
+fi
 
 docker_exec run -d \
     --name "${CONTAINER_NAME}" \
