@@ -347,15 +347,8 @@ case "${ACTION}" in
     ;;
 esac
 
-for _ in {1..90}; do
-  if curl -fsS "http://127.0.0.1:${PORT}" >/dev/null 2>&1; then
-    log "Gaseous is ready at: http://localhost:${PORT}"
-    log "Use --off to stop, --on to start existing install, -D to fully remove."
-    exit 0
-  fi
-  sleep 1
-done
-
-log "Gaseous stack started, but readiness check timed out."
+log "Gaseous stack started in detached mode."
+log "Open: http://localhost:${PORT}"
+log "Use --off to stop, --on to start existing install, -D to fully remove."
 log "Check logs with: docker logs -f ${SERVER_CONTAINER_NAME}"
 exit 0
