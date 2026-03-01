@@ -24,6 +24,7 @@ STACK_NAME="nextcloud"
 NEXTCLOUD_CONTAINER_NAME="nextcloud-app"
 DB_CONTAINER_NAME="nextcloud-db"
 REDIS_CONTAINER_NAME="nextcloud-redis"
+DEFAULT_ADMIN_USER="admin"
 
 NEXTCLOUD_IMAGE="nextcloud:latest"
 DB_IMAGE="mariadb:11"
@@ -192,15 +193,19 @@ read_env_value() {
 
 write_env_file() {
     local external_data_dir="$1"
-    local db_root_password db_password redis_password
+    local db_root_password db_password redis_password admin_user admin_password
 
     db_root_password="$(read_env_value "MYSQL_ROOT_PASSWORD" || true)"
     db_password="$(read_env_value "MYSQL_PASSWORD" || true)"
     redis_password="$(read_env_value "REDIS_PASSWORD" || true)"
+    admin_user="$(read_env_value "NEXTCLOUD_ADMIN_USER" || true)"
+    admin_password="$(read_env_value "NEXTCLOUD_ADMIN_PASSWORD" || true)"
 
     [[ -n "${db_root_password}" ]] || db_root_password="$(random_token)"
     [[ -n "${db_password}" ]] || db_password="$(random_token)"
     [[ -n "${redis_password}" ]] || redis_password="$(random_token)"
+    [[ -n "${admin_user}" ]] || admin_user="${DEFAULT_ADMIN_USER}"
+    [[ -n "${admin_password}" ]] || admin_password="$(random_token)"
 
     cat >"${ENV_FILE}" <<EOF
 NEXTCLOUD_PORT=${PORT}
@@ -215,7 +220,31 @@ MYSQL_PASSWORD=${db_password}
 MYSQL_ROOT_PASSWORD=${db_root_password}
 
 REDIS_PASSWORD=${redis_password}
+
+NEXTCLOUD_ADMIN_USER=${admin_user}
+NEXTCLOUD_ADMIN_PASSWORD=${admin_password}
 EOF
+}
+
+print_access_summary() {
+    local url="http://localhost:${PORT}"
+    local admin_user admin_password external_data_dir
+
+    admin_user="$(read_env_value "NEXTCLOUD_ADMIN_USER" || true)"
+    admin_password="$(read_env_value "NEXTCLOUD_ADMIN_PASSWORD" || true)"
+    external_data_dir="$(read_env_value "NEXTCLOUD_EXTERNAL_DATA_DIR" || true)"
+
+    log "=== Nextcloud is ready ==="
+    log "URL: ${url}"
+    log "Port: ${PORT}"
+    if [[ -n "${admin_user}" && -n "${admin_password}" ]]; then
+        log "Username: ${admin_user}"
+        log "Password: ${admin_password}"
+    fi
+    if [[ -n "${external_data_dir}" ]]; then
+        log "Data directory: ${external_data_dir}"
+    fi
+    log "Use --off to stop, --on to start existing install, -D to fully remove."
 }
 
 sync_compose_template() {
@@ -378,7 +407,7 @@ fi
 sync_compose_template
 
 if [[ "${ACTION}" == "on" ]] && container_running "${NEXTCLOUD_CONTAINER_NAME}" && container_running "${DB_CONTAINER_NAME}"; then
-    log "${STACK_NAME} is already running at http://localhost:${PORT}"
+    print_access_summary
     exit 0
 fi
 
@@ -386,8 +415,7 @@ start_stack
 
 for _ in {1..90}; do
     if curl -fsS "http://127.0.0.1:${PORT}" >/dev/null 2>&1; then
-        log "Nextcloud is ready at: http://localhost:${PORT}"
-        log "Open in browser and complete the initial admin setup."
+        print_access_summary
         exit 0
     fi
     sleep 1
@@ -395,4 +423,5 @@ done
 
 log "Nextcloud stack started, but readiness check timed out."
 log "Check logs with: docker logs -f ${NEXTCLOUD_CONTAINER_NAME}"
+print_access_summary
 exit 0
