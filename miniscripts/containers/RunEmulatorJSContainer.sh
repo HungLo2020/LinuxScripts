@@ -11,7 +11,7 @@
 #   ./RunEmulatorJSContainer.sh --on     Start container only if already installed
 #
 # Notes:
-#   - Default exposed port: 8080
+#   - Default exposed port: 8079
 #   - ROMs directory (host): /srv/storage/OneDrive/Apps/Games/Emulators/Roms/
 #   - Saves directory (host): /srv/storage/OneDrive/Apps/Games/Emulators/Saves/
 # =============================================================================
@@ -30,7 +30,7 @@ BASE_DATA_DIR="${HOME}/.emulatorjs"
 ROMS_DIR="/srv/storage/OneDrive/Apps/Games/Emulators/Roms"
 SAVES_DIR="/srv/storage/OneDrive/Apps/Games/Emulators/Saves"
 # Allow overriding host port via env var `EMULATORJS_PORT`.
-PORT="${EMULATORJS_PORT:-8080}"
+PORT="${EMULATORJS_PORT:-8079}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="${SCRIPT_DIR}"
