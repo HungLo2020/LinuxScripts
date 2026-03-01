@@ -38,7 +38,7 @@ while [[ "${REPO_ROOT}" != "/" && ! -d "${REPO_ROOT}/resources" ]]; do
 done
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
-log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*"; }
+log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" >&2; }
 
 DOCKER_USE_SUDO="false"
 docker_exec() {
