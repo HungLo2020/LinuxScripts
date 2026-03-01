@@ -20,10 +20,9 @@ set -euo pipefail
 
 # ── Configuration ─────────────────────────────────────────────────────────────
 CONTAINER_NAME="emulatorjs"
-# Default image name. Users may override by setting EMULATORJS_IMAGE in the
-# environment or by editing this variable. If the first pull fails the script
-# will try a short list of common alternatives.
-IMAGE_NAME="emulatorjs/emulatorjs:latest"
+# Default image name. Use the popular LinuxServer build by default; allow
+# overriding with `EMULATORJS_IMAGE` environment variable.
+IMAGE_NAME="linuxserver/emulatorjs:latest"
 BASE_DATA_DIR="${HOME}/.emulatorjs"
 # Where roms and saves are stored on the host. Update these variables if you
 # keep your files elsewhere. These defaults point to your requested OneDrive
@@ -205,7 +204,7 @@ if [[ "${ACTION}" == "run" ]]; then
     SELECTED_IMAGE="${EMULATORJS_IMAGE:-${IMAGE_NAME}}"
     if ! docker_exec pull "${SELECTED_IMAGE}" >/dev/null 2>&1; then
         # try common alternatives
-        candidates=("${IMAGE_NAME}" "fgl27/emulatorjs:latest" "ghcr.io/jrhe/EmulatorJS:latest" "ghcr.io/emulatorjs/emulatorjs:latest")
+        candidates=("${IMAGE_NAME}" "fgl27/emulatorjs:latest" "ghcr.io/jrhe/EmulatorJS:latest" "ghcr.io/emulatorjs/emulatorjs:latest" "marce007/emulatorjs:latest")
         # ensure selected image is first candidate
         candidates=("${SELECTED_IMAGE}" "${candidates[@]}")
         # remove duplicates while preserving order
