@@ -20,7 +20,9 @@ set -euo pipefail
 
 # ── Configuration ─────────────────────────────────────────────────────────────
 CONTAINER_NAME="emulatorjs"
-# Image chosen to match common EmulatorJS images on Docker Hub / GHCR.
+# Default image name. Users may override by setting EMULATORJS_IMAGE in the
+# environment or by editing this variable. If the first pull fails the script
+# will try a short list of common alternatives.
 IMAGE_NAME="emulatorjs/emulatorjs:latest"
 BASE_DATA_DIR="${HOME}/.emulatorjs"
 # Where roms and saves are stored on the host. Update these variables if you
@@ -185,9 +187,45 @@ fi
 # ── Ensure folders and prepare files ─────────────────────────────────────────
 mkdir -p "${BASE_DATA_DIR}" "${ROMS_DIR}" "${SAVES_DIR}"
 
+try_pull() {
+    local img
+    for img in "$@"; do
+        log "Attempting to pull image: ${img}"
+        if docker_exec pull "${img}" >/dev/null 2>&1; then
+            echo "${img}"
+            return 0
+        fi
+    done
+    return 1
+}
+
 if [[ "${ACTION}" == "run" ]]; then
     log "Pulling latest EmulatorJS image..."
-    docker_exec pull "${IMAGE_NAME}" >/dev/null || true
+    # Allow overriding with env var
+    SELECTED_IMAGE="${EMULATORJS_IMAGE:-${IMAGE_NAME}}"
+    if ! docker_exec pull "${SELECTED_IMAGE}" >/dev/null 2>&1; then
+        # try common alternatives
+        candidates=("${IMAGE_NAME}" "fgl27/emulatorjs:latest" "ghcr.io/jrhe/EmulatorJS:latest" "ghcr.io/emulatorjs/emulatorjs:latest")
+        # ensure selected image is first candidate
+        candidates=("${SELECTED_IMAGE}" "${candidates[@]}")
+        # remove duplicates while preserving order
+        seen=()
+        unique_candidates=()
+        for c in "${candidates[@]}"; do
+            if [[ -z "${seen[$c]:-}" ]]; then
+                unique_candidates+=("$c")
+                seen[$c]=1
+            fi
+        done
+
+        if ! SELECTED_IMAGE="$(try_pull "${unique_candidates[@]}")"; then
+            log "Error: could not pull any known EmulatorJS image."
+            log "Set the EMULATORJS_IMAGE environment variable to a valid image name and re-run." 
+            exit 1
+        fi
+        log "Using image: ${SELECTED_IMAGE}"
+    fi
+    IMAGE_NAME="${SELECTED_IMAGE}"
 fi
 
 # ── Start or create container ─────────────────────────────────────────────────
