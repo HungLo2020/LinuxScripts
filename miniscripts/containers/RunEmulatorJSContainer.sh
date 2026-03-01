@@ -29,8 +29,14 @@ BASE_DATA_DIR="${HOME}/.emulatorjs"
 # locations.
 ROMS_DIR="/srv/storage/OneDrive/Apps/Games/Emulators/Roms"
 SAVES_DIR="/srv/storage/OneDrive/Apps/Games/Emulators/Saves"
-# Allow overriding host port via env var `EMULATORJS_PORT`.
+# Allow overriding host port via env var `EMULATORJS_PORT` (frontend)
 PORT="${EMULATORJS_PORT:-8079}"
+# Backend (management) port mapping on the host; default to 3002 per request.
+BACKEND_PORT="${EMULATORJS_BACKEND_PORT:-3002}"
+
+# Persistent config and data on the host under the base data dir
+CONFIG_DIR="${BASE_DATA_DIR}/config"
+DATA_DIR="${BASE_DATA_DIR}/data"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="${SCRIPT_DIR}"
@@ -186,6 +192,7 @@ fi
 
 # ── Ensure folders and prepare files ─────────────────────────────────────────
 mkdir -p "${BASE_DATA_DIR}" "${ROMS_DIR}" "${SAVES_DIR}"
+mkdir -p "${CONFIG_DIR}" "${DATA_DIR}"
 
 try_pull() {
     local img
@@ -273,12 +280,26 @@ if port_in_use "${PORT}"; then
     exit 1
 fi
 
+if port_in_use "${BACKEND_PORT}"; then
+    log "Error: backend host port ${BACKEND_PORT} is already in use."
+    log "To inspect which process is using it run: sudo lsof -iTCP -sTCP:LISTEN -P -n | grep :${BACKEND_PORT}"
+    log "If a Docker container bound the port, check: sudo docker ps --format '{{.Names}}\t{{.Ports}}' | grep :${BACKEND_PORT}" 
+    log "To use a different backend port, run: EMULATORJS_BACKEND_PORT=3003 ./miniscripts/containers/RunEmulatorJSContainer.sh"
+    exit 1
+fi
+
 docker_exec run -d \
     --name "${CONTAINER_NAME}" \
     --restart unless-stopped \
+    -e PUID="$(id -u)" \
+    -e PGID="$(id -g)" \
+    -e TZ="${TZ:-Etc/UTC}" \
     -p "${PORT}:80" \
-    -v "${ROMS_DIR}:/app/roms:ro" \
-    -v "${SAVES_DIR}:/app/saves" \
+    -p "${BACKEND_PORT}:3000" \
+    -v "${CONFIG_DIR}:/config" \
+    -v "${DATA_DIR}:/data" \
+    -v "${ROMS_DIR}:/data/roms:ro" \
+    -v "${SAVES_DIR}:/data/saves" \
     -v "/var/run/docker.sock:/var/run/docker.sock:ro" \
     "${IMAGE_NAME}" >/dev/null
 
@@ -286,6 +307,7 @@ docker_exec run -d \
 for _ in {1..60}; do
     if curl -fsS "http://127.0.0.1:${PORT}" >/dev/null 2>&1; then
         log "EmulatorJS is ready at: http://localhost:${PORT}"
+        log "Management backend: http://localhost:${BACKEND_PORT}"
         exit 0
     fi
     sleep 1
