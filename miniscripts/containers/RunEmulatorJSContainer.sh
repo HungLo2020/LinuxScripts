@@ -209,7 +209,7 @@ if [[ "${ACTION}" == "run" ]]; then
         # ensure selected image is first candidate
         candidates=("${SELECTED_IMAGE}" "${candidates[@]}")
         # remove duplicates while preserving order
-        seen=()
+        declare -A seen=()
         unique_candidates=()
         for c in "${candidates[@]}"; do
             if [[ -z "${seen[$c]:-}" ]]; then
