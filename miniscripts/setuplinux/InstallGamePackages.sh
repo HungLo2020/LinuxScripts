@@ -15,7 +15,6 @@ echo "Running AddRepos.sh before game package installs..."
 
 game_packages=(
   "steam"
-  "retroarch"
   "kmines"
 )
 
