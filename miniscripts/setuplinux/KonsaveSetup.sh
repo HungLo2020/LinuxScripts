@@ -9,6 +9,9 @@ KONSAVE_SETUP_SCRIPT="$NOTAUTORUN_DIR/KonsaveSetup.sh"
 DOWNLOAD_PROFILES_SCRIPT="$NOTAUTORUN_DIR/DownloadKonsaveProfiles.sh"
 APPLY_PROFILE_SCRIPT="$NOTAUTORUN_DIR/ApplyKonsaveProfile.sh"
 
+# Install Papirus Icons
+sudo apt install -y papirus-icon-theme
+
 for required_script in "$KONSAVE_SETUP_SCRIPT" "$DOWNLOAD_PROFILES_SCRIPT" "$APPLY_PROFILE_SCRIPT"; do
   if [[ ! -f "$required_script" ]]; then
     echo "Error: Required script not found: $required_script"
