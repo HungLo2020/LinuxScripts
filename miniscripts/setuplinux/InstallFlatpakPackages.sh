@@ -3,7 +3,6 @@
 set -euo pipefail
 
 flatpak_packages=(
-  "com.usebottles.bottles"
   "com.github.tchx84.Flatseal"
   "io.missioncenter.MissionCenter"
   "com.discordapp.Discord"
