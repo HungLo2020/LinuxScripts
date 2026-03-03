@@ -208,6 +208,7 @@ if ! bash "$BITWARDEN_LOGIN_SCRIPT"; then
 fi
 
 # Run apt update once at the start to ensure we have the latest package info after script selection
+sudo add-apt-repository multiverse -y
 echo "Updating package lists..."
 sudo apt update
 echo "Upgrading installed packages..."
