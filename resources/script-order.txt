@@ -7,4 +7,5 @@ RDSetup.sh
 SetupSMBMount.sh
 
 [last]
+InstallGamePackages.sh
 RemoveUnwantedPackages.sh
