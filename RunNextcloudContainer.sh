@@ -83,6 +83,48 @@ ensure_dir_for_user() {
     sudo chown "${USER}:${USER}" "${path}"
 }
 
+prepare_external_data_dir() {
+    local path="$1"
+    local marker_file="${path}/.ncdata"
+
+    if [[ ! -d "${path}" ]]; then
+        ensure_dir_for_user "${path}"
+    fi
+
+    if ! touch "${marker_file}" 2>/dev/null; then
+        sudo touch "${marker_file}"
+    fi
+
+    if command -v setfacl >/dev/null 2>&1; then
+        if setfacl -m u:33:rwx "${path}" >/dev/null 2>&1 && \
+            setfacl -d -m u:33:rwx "${path}" >/dev/null 2>&1 && \
+            setfacl -m u:33:rw "${marker_file}" >/dev/null 2>&1; then
+            return 0
+        fi
+
+        if sudo setfacl -m u:33:rwx "${path}" >/dev/null 2>&1 && \
+            sudo setfacl -d -m u:33:rwx "${path}" >/dev/null 2>&1 && \
+            sudo setfacl -m u:33:rw "${marker_file}" >/dev/null 2>&1; then
+            return 0
+        fi
+    fi
+
+    if chown 33:33 "${path}" "${marker_file}" >/dev/null 2>&1 && \
+        chmod 770 "${path}" >/dev/null 2>&1 && \
+        chmod 660 "${marker_file}" >/dev/null 2>&1; then
+        return 0
+    fi
+
+    if sudo chown 33:33 "${path}" "${marker_file}" >/dev/null 2>&1 && \
+        sudo chmod 770 "${path}" >/dev/null 2>&1 && \
+        sudo chmod 660 "${marker_file}" >/dev/null 2>&1; then
+        return 0
+    fi
+
+    log "Error: could not grant write access for Nextcloud webserver user (uid 33) on ${path}."
+    exit 1
+}
+
 ensure_docker() {
     if ! command -v docker >/dev/null 2>&1; then
         log "Error: Docker is not installed. Install Docker and rerun this script."
@@ -204,6 +246,7 @@ mkdir -p "${NEXTCLOUD_APP_DIR}" "${DB_DIR}"
 
 existing_external_dir="$(read_env_value "NEXTCLOUD_EXTERNAL_DATA_DIR" || true)"
 selected_external_dir="$(prompt_external_data_dir "${existing_external_dir}")"
+prepare_external_data_dir "${selected_external_dir}"
 
 write_env_file "${selected_external_dir}"
 sync_compose_template
