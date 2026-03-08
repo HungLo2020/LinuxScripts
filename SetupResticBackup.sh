@@ -241,6 +241,48 @@ ensure_password_file_exists() {
   chmod 600 "${password_path}"
 }
 
+write_password_file() {
+  local password_path="$1"
+  local password_value="$2"
+
+  mkdir -p "$(dirname "${password_path}")"
+  printf '%s' "${password_value}" >"${password_path}"
+  chmod 600 "${password_path}"
+}
+
+prompt_restic_password() {
+  local allow_keep_existing="$1"
+  local result_var="$2"
+  local password_one=""
+  local password_two=""
+
+  while true; do
+    read -r -s -p "Enter restic password (hint: standard pc password): " password_one
+    echo
+
+    if [[ -z "${password_one}" && "${allow_keep_existing}" == "true" ]]; then
+      printf -v "${result_var}" '%s' ""
+      return 0
+    fi
+
+    if [[ -z "${password_one}" ]]; then
+      echo "Password cannot be empty."
+      continue
+    fi
+
+    read -r -s -p "Confirm restic password: " password_two
+    echo
+
+    if [[ "${password_one}" != "${password_two}" ]]; then
+      echo "Passwords do not match. Try again."
+      continue
+    fi
+
+    printf -v "${result_var}" '%s' "${password_one}"
+    return 0
+  done
+}
+
 validate_source_directory() {
   local source_path="$1"
 
@@ -816,6 +858,7 @@ run_setup_flow() {
 
   local repo_path source_path config_name config_slug
   local config_file password_file overwrite_choice=""
+  local entered_password="" allow_keep_existing_password="false"
 
   prompt_path "Enter restic repository path" "${DEFAULT_REPO_PATH}" repo_path
   prompt_path "Enter source path to back up" "${DEFAULT_SOURCE_PATH}" source_path
@@ -842,7 +885,19 @@ run_setup_flow() {
     fi
   fi
 
-  ensure_password_file_exists "${password_file}"
+  if [[ -f "${password_file}" ]]; then
+    allow_keep_existing_password="true"
+    echo "Press Enter at password prompt to keep existing password for this config."
+  fi
+
+  prompt_restic_password "${allow_keep_existing_password}" entered_password
+  if [[ -n "${entered_password}" ]]; then
+    write_password_file "${password_file}" "${entered_password}"
+  elif [[ ! -f "${password_file}" ]]; then
+    log "Error: password file does not exist and no password was entered."
+    return 1
+  fi
+
   write_config_file "${config_name}" "${config_slug}" "${repo_path}" "${source_path}" "${password_file}"
   load_config_by_slug "${config_slug}"
   ensure_repo_initialized
