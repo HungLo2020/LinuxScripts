@@ -8,6 +8,7 @@ DEFAULT_CONFIG_NAME="MattMC"
 
 CONFIG_ROOT="${HOME}/.config/restic-mattmc"
 CONFIGS_DIR="${CONFIG_ROOT}/configs"
+HELPERS_DIR="${CONFIG_ROOT}/helpers"
 CURRENT_CONFIG_FILE="${CONFIG_ROOT}/current_config"
 LEGACY_CONFIG_FILE="${CONFIG_ROOT}/backup.env"
 LEGACY_PASSWORD_FILE="${CONFIG_ROOT}/password"
@@ -33,8 +34,8 @@ log() {
 }
 
 ensure_config_dirs() {
-  mkdir -p "${CONFIGS_DIR}"
-  chmod 700 "${CONFIG_ROOT}" "${CONFIGS_DIR}" 2>/dev/null || true
+  mkdir -p "${CONFIGS_DIR}" "${HELPERS_DIR}"
+  chmod 700 "${CONFIG_ROOT}" "${CONFIGS_DIR}" "${HELPERS_DIR}" 2>/dev/null || true
 }
 
 collect_config_index() {
@@ -105,6 +106,11 @@ timer_path_for_slug() {
   echo "/etc/systemd/system/$(timer_name_for_slug "${slug}")"
 }
 
+helper_script_path_for_slug() {
+  local slug="$1"
+  echo "${HELPERS_DIR}/restic-backup-${slug}.sh"
+}
+
 ensure_restic_installed() {
   if command -v restic >/dev/null 2>&1; then
     return 0
@@ -131,6 +137,87 @@ ensure_systemd_available() {
     log "Error: systemctl is not available on this system."
     exit 1
   fi
+}
+
+create_backup_helper_script() {
+  local slug="$1"
+  local config_file helper_script
+
+  config_file="$(config_file_for_slug "${slug}")"
+  helper_script="$(helper_script_path_for_slug "${slug}")"
+
+  if [[ ! -f "${config_file}" ]]; then
+    log "Error: missing config file for helper generation: ${config_file}"
+    exit 1
+  fi
+
+  cat >"${helper_script}" <<EOF
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+CONFIG_FILE="${config_file}"
+
+log() {
+  echo "[\$(date '+%Y-%m-%d %H:%M:%S')] [restic-helper] \$*"
+}
+
+if [[ ! -f "\${CONFIG_FILE}" ]]; then
+  log "Error: config file missing: \${CONFIG_FILE}"
+  exit 1
+fi
+
+# shellcheck disable=SC1090
+source "\${CONFIG_FILE}"
+
+for required_var in CONFIG_NAME CONFIG_SLUG RESTIC_REPOSITORY RESTIC_SOURCE RESTIC_PASSWORD_FILE KEEP_DAILY KEEP_WEEKLY KEEP_MONTHLY KEEP_YEARLY; do
+  if [[ -z "\${!required_var:-}" ]]; then
+    log "Error: missing required setting '\${required_var}' in \${CONFIG_FILE}"
+    exit 1
+  fi
+done
+
+if ! command -v restic >/dev/null 2>&1; then
+  log "Error: restic is not installed."
+  exit 1
+fi
+
+if [[ ! -f "\${RESTIC_PASSWORD_FILE}" ]]; then
+  log "Error: password file missing: \${RESTIC_PASSWORD_FILE}"
+  exit 1
+fi
+
+if [[ ! -d "\${RESTIC_SOURCE}" ]]; then
+  log "Error: source path missing: \${RESTIC_SOURCE}"
+  exit 1
+fi
+
+mkdir -p "\${RESTIC_REPOSITORY}"
+
+if [[ ! -f "\${RESTIC_REPOSITORY}/config" ]]; then
+  log "Initializing repository: \${RESTIC_REPOSITORY}"
+  RESTIC_PASSWORD_FILE="\${RESTIC_PASSWORD_FILE}" restic -r "\${RESTIC_REPOSITORY}" init
+else
+  if ! RESTIC_PASSWORD_FILE="\${RESTIC_PASSWORD_FILE}" restic -r "\${RESTIC_REPOSITORY}" snapshots >/dev/null 2>&1; then
+    log "Error: existing repository could not be opened with current password."
+    exit 1
+  fi
+fi
+
+log "Running backup for config '\${CONFIG_NAME}' from \${RESTIC_SOURCE}"
+RESTIC_PASSWORD_FILE="\${RESTIC_PASSWORD_FILE}" restic -r "\${RESTIC_REPOSITORY}" backup "\${RESTIC_SOURCE}"
+
+log "Applying retention policy"
+RESTIC_PASSWORD_FILE="\${RESTIC_PASSWORD_FILE}" restic -r "\${RESTIC_REPOSITORY}" forget --prune \
+  --keep-daily "\${KEEP_DAILY}" \
+  --keep-weekly "\${KEEP_WEEKLY}" \
+  --keep-monthly "\${KEEP_MONTHLY}" \
+  --keep-yearly "\${KEEP_YEARLY}"
+
+log "Backup helper completed successfully."
+EOF
+
+chmod 700 "${helper_script}"
 }
 
 random_token() {
@@ -530,14 +617,16 @@ run_backup_now() {
 }
 
 setup_systemd_timer() {
-  local run_user service_name timer_name service_path timer_path
+  local run_user service_name timer_name service_path timer_path helper_script
   run_user="${USER}"
   service_name="$(service_name_for_slug "${ACTIVE_CONFIG_SLUG}")"
   timer_name="$(timer_name_for_slug "${ACTIVE_CONFIG_SLUG}")"
   service_path="$(service_path_for_slug "${ACTIVE_CONFIG_SLUG}")"
   timer_path="$(timer_path_for_slug "${ACTIVE_CONFIG_SLUG}")"
+  helper_script="$(helper_script_path_for_slug "${ACTIVE_CONFIG_SLUG}")"
 
   ensure_systemd_available
+  create_backup_helper_script "${ACTIVE_CONFIG_SLUG}"
 
   sudo tee "${service_path}" >/dev/null <<EOF
 [Unit]
@@ -549,7 +638,7 @@ Wants=network-online.target
 Type=oneshot
 User=${run_user}
 Group=${run_user}
-ExecStart=${SCRIPT_PATH} --run-backup --config-name ${ACTIVE_CONFIG_SLUG}
+ExecStart=${helper_script}
 EOF
 
   sudo tee "${timer_path}" >/dev/null <<EOF
@@ -676,7 +765,7 @@ is_repo_used_by_other_configs() {
 delete_config_by_index() {
   local index="$1"
   local slug name config_file password_file repo_path
-  local timer_name service_name timer_path service_path
+  local timer_name service_name timer_path service_path helper_script
   local confirm delete_repo_choice current_slug
 
   collect_config_index
@@ -705,6 +794,7 @@ delete_config_by_index() {
   timer_name="$(timer_name_for_slug "${slug}")"
   service_path="$(service_path_for_slug "${slug}")"
   timer_path="$(timer_path_for_slug "${slug}")"
+  helper_script="$(helper_script_path_for_slug "${slug}")"
 
   read -r -p "Delete config '${name}' [${slug}] and associated service/timer? [y/N]: " confirm
   confirm="${confirm:-N}"
@@ -719,6 +809,7 @@ delete_config_by_index() {
   fi
 
   sudo rm -f "${service_path}" "${timer_path}" >/dev/null 2>&1 || rm -f "${service_path}" "${timer_path}" || true
+  rm -f "${helper_script}" >/dev/null 2>&1 || sudo rm -f "${helper_script}" >/dev/null 2>&1 || true
 
   if command -v systemctl >/dev/null 2>&1; then
     sudo systemctl daemon-reload || true
