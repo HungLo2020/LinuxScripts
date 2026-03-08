@@ -25,6 +25,8 @@ ACTIVE_CONFIG_FILE=""
 RESTIC_REPOSITORY=""
 RESTIC_SOURCE=""
 RESTIC_PASSWORD_FILE=""
+declare -a CONFIG_INDEX_SLUGS=()
+declare -a CONFIG_INDEX_NAMES=()
 
 log() {
   echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*"
@@ -33,6 +35,26 @@ log() {
 ensure_config_dirs() {
   mkdir -p "${CONFIGS_DIR}"
   chmod 700 "${CONFIG_ROOT}" "${CONFIGS_DIR}" 2>/dev/null || true
+}
+
+collect_config_index() {
+  local config_file slug name
+
+  CONFIG_INDEX_SLUGS=()
+  CONFIG_INDEX_NAMES=()
+
+  ensure_config_dirs
+  shopt -s nullglob
+  for config_file in "${CONFIGS_DIR}"/*.env; do
+    slug="$(basename "${config_file}" .env)"
+    name=""
+    # shellcheck disable=SC1090
+    source "${config_file}"
+    name="${CONFIG_NAME:-${slug}}"
+    CONFIG_INDEX_SLUGS+=("${slug}")
+    CONFIG_INDEX_NAMES+=("${name}")
+  done
+  shopt -u nullglob
 }
 
 normalize_path() {
@@ -530,18 +552,16 @@ list_all_configs() {
   local idx=1
   local config_file slug timer_name timer_state
 
-  ensure_config_dirs
-  shopt -s nullglob
+  collect_config_index
 
-  if ! compgen -G "${CONFIGS_DIR}/*.env" >/dev/null; then
-    shopt -u nullglob
+  if [[ "${#CONFIG_INDEX_SLUGS[@]}" -eq 0 ]]; then
     echo "No backup configs found."
     return 0
   fi
 
   echo "=== All Backup Configs ==="
-  for config_file in "${CONFIGS_DIR}"/*.env; do
-    slug="$(basename "${config_file}" .env)"
+  for slug in "${CONFIG_INDEX_SLUGS[@]}"; do
+    config_file="$(config_file_for_slug "${slug}")"
     # shellcheck disable=SC1090
     source "${config_file}"
 
@@ -557,8 +577,146 @@ list_all_configs() {
     echo "    Timer:  ${timer_name} (${timer_state})"
     ((idx++))
   done
+}
 
+is_password_file_used_by_other_configs() {
+  local password_path="$1"
+  local skip_slug="$2"
+  local config_file slug candidate_password
+
+  shopt -s nullglob
+  for config_file in "${CONFIGS_DIR}"/*.env; do
+    slug="$(basename "${config_file}" .env)"
+    if [[ "${slug}" == "${skip_slug}" ]]; then
+      continue
+    fi
+
+    candidate_password=""
+    # shellcheck disable=SC1090
+    source "${config_file}"
+    candidate_password="${RESTIC_PASSWORD_FILE:-}"
+    if [[ -n "${candidate_password}" && "${candidate_password}" == "${password_path}" ]]; then
+      shopt -u nullglob
+      return 0
+    fi
+  done
   shopt -u nullglob
+
+  return 1
+}
+
+is_repo_used_by_other_configs() {
+  local repo_path="$1"
+  local skip_slug="$2"
+  local config_file slug candidate_repo
+
+  shopt -s nullglob
+  for config_file in "${CONFIGS_DIR}"/*.env; do
+    slug="$(basename "${config_file}" .env)"
+    if [[ "${slug}" == "${skip_slug}" ]]; then
+      continue
+    fi
+
+    candidate_repo=""
+    # shellcheck disable=SC1090
+    source "${config_file}"
+    candidate_repo="${RESTIC_REPOSITORY:-}"
+    if [[ -n "${candidate_repo}" && "${candidate_repo}" == "${repo_path}" ]]; then
+      shopt -u nullglob
+      return 0
+    fi
+  done
+  shopt -u nullglob
+
+  return 1
+}
+
+delete_config_by_index() {
+  local index="$1"
+  local slug name config_file password_file repo_path
+  local timer_name service_name timer_path service_path
+  local confirm delete_repo_choice current_slug
+
+  collect_config_index
+
+  if [[ "${#CONFIG_INDEX_SLUGS[@]}" -eq 0 ]]; then
+    log "No configs to delete."
+    return 0
+  fi
+
+  if [[ ! "${index}" =~ ^[0-9]+$ ]] || (( index < 1 || index > ${#CONFIG_INDEX_SLUGS[@]} )); then
+    log "Invalid config number '${index}'. Use option 2 to see config numbers."
+    return 1
+  fi
+
+  slug="${CONFIG_INDEX_SLUGS[$((index - 1))]}"
+  name="${CONFIG_INDEX_NAMES[$((index - 1))]}"
+
+  if ! load_config_by_slug "${slug}"; then
+    return 1
+  fi
+
+  config_file="$(config_file_for_slug "${slug}")"
+  password_file="${RESTIC_PASSWORD_FILE}"
+  repo_path="${RESTIC_REPOSITORY}"
+  service_name="$(service_name_for_slug "${slug}")"
+  timer_name="$(timer_name_for_slug "${slug}")"
+  service_path="$(service_path_for_slug "${slug}")"
+  timer_path="$(timer_path_for_slug "${slug}")"
+
+  read -r -p "Delete config '${name}' [${slug}] and associated service/timer? [y/N]: " confirm
+  confirm="${confirm:-N}"
+  if [[ ! "${confirm}" =~ ^[Yy]$ ]]; then
+    log "Delete cancelled."
+    return 0
+  fi
+
+  if command -v systemctl >/dev/null 2>&1; then
+    sudo systemctl disable --now "${timer_name}" >/dev/null 2>&1 || true
+    sudo systemctl stop "${service_name}" >/dev/null 2>&1 || true
+  fi
+
+  sudo rm -f "${service_path}" "${timer_path}" >/dev/null 2>&1 || rm -f "${service_path}" "${timer_path}" || true
+
+  if command -v systemctl >/dev/null 2>&1; then
+    sudo systemctl daemon-reload || true
+    sudo systemctl reset-failed "${service_name}" "${timer_name}" >/dev/null 2>&1 || true
+  fi
+
+  rm -f "${config_file}"
+
+  if [[ -f "${password_file}" ]]; then
+    if is_password_file_used_by_other_configs "${password_file}" "${slug}"; then
+      log "Password file is shared by another config; preserving ${password_file}."
+    else
+      rm -f "${password_file}"
+    fi
+  fi
+
+  if is_repo_used_by_other_configs "${repo_path}" "${slug}"; then
+    log "Repository is used by another config; preserving ${repo_path}."
+  else
+    read -r -p "Delete repository directory and backup data at '${repo_path}' too? [Y/n]: " delete_repo_choice
+    delete_repo_choice="${delete_repo_choice:-Y}"
+    if [[ "${delete_repo_choice}" =~ ^[Yy]$ ]]; then
+      rm -rf "${repo_path}" >/dev/null 2>&1 || sudo rm -rf "${repo_path}"
+      log "Deleted repository directory: ${repo_path}"
+    else
+      log "Repository preserved: ${repo_path}"
+    fi
+  fi
+
+  current_slug="$(get_current_config_slug || true)"
+  if [[ "${current_slug}" == "${slug}" ]]; then
+    collect_config_index
+    if [[ "${#CONFIG_INDEX_SLUGS[@]}" -gt 0 ]]; then
+      set_current_config_slug "${CONFIG_INDEX_SLUGS[0]}"
+    else
+      rm -f "${CURRENT_CONFIG_FILE}"
+    fi
+  fi
+
+  log "Deleted config '${name}' [${slug}]."
 }
 
 collect_snapshots() {
@@ -706,6 +864,10 @@ print_menu() {
   echo "7) Show current configuration"
   echo "8) Exit"
   echo
+  echo "Special commands:"
+  echo "  delete <config-number>   Delete config + service/timer (example: delete 1)"
+  echo "                           Use option 2 to see config numbers"
+  echo
 }
 
 main_loop() {
@@ -713,6 +875,11 @@ main_loop() {
   while true; do
     print_menu
     read -r -p "Choose an option [1-8]: " choice
+
+    if [[ "${choice}" =~ ^[Dd][Ee][Ll][Ee][Tt][Ee][[:space:]]+([0-9]+)$ ]]; then
+      delete_config_by_index "${BASH_REMATCH[1]}"
+      continue
+    fi
 
     case "${choice}" in
       1)
