@@ -761,6 +761,26 @@ delete_config_by_index() {
   log "Deleted config '${name}' [${slug}]."
 }
 
+resolve_config_slug_by_index() {
+  local index="$1"
+  local result_var="$2"
+
+  collect_config_index
+
+  if [[ "${#CONFIG_INDEX_SLUGS[@]}" -eq 0 ]]; then
+    log "No configs found. Run setup first."
+    return 1
+  fi
+
+  if [[ ! "${index}" =~ ^[0-9]+$ ]] || (( index < 1 || index > ${#CONFIG_INDEX_SLUGS[@]} )); then
+    log "Invalid config number '${index}'. Use the list above for valid numbers."
+    return 1
+  fi
+
+  printf -v "${result_var}" '%s' "${CONFIG_INDEX_SLUGS[$((index - 1))]}"
+  return 0
+}
+
 collect_snapshots() {
   local snapshot_output
   snapshot_output="$(restic_cmd snapshots --compact 2>/dev/null || true)"
@@ -909,30 +929,66 @@ run_setup_flow() {
 
 print_menu() {
   echo
+  list_all_configs
+  echo
   echo "=== Restic Backup Manager ==="
   echo "1) Run / rerun setup"
-  echo "2) List all configs"
-  echo "3) Take immediate backup now"
-  echo "4) List backups (dates + sizes)"
-  echo "5) Restore snapshot to Downloads"
-  echo "6) Run forget + prune now"
-  echo "7) Show current configuration"
-  echo "8) Exit"
+  echo "2) Exit"
   echo
   echo "Special commands:"
   echo "  delete <config-number>   Delete config + service/timer (example: delete 1)"
-  echo "                           Use option 2 to see config numbers"
+  echo "  3 <config-number>        Take immediate backup now"
+  echo "  4 <config-number>        List backups (dates + sizes)"
+  echo "  5 <config-number>        Restore snapshot to Downloads"
+  echo "  6 <config-number>        Run forget + prune now"
+  echo "  7 <config-number>        Show current configuration"
+  echo "  backup|snapshots|restore|forget|show <config-number>"
   echo
 }
 
 main_loop() {
-  local choice
+  local choice config_slug
   while true; do
     print_menu
-    read -r -p "Choose an option [1-8]: " choice
+    read -r -p "Choose an option [1-2 or command]: " choice
 
     if [[ "${choice}" =~ ^[Dd][Ee][Ll][Ee][Tt][Ee][[:space:]]+([0-9]+)$ ]]; then
       delete_config_by_index "${BASH_REMATCH[1]}"
+      continue
+    fi
+
+    if [[ "${choice}" =~ ^3[[:space:]]+([0-9]+)$ ]] || [[ "${choice}" =~ ^[Bb][Aa][Cc][Kk][Uu][Pp][[:space:]]+([0-9]+)$ ]]; then
+      if resolve_config_slug_by_index "${BASH_REMATCH[1]}" config_slug; then
+        run_backup_now "${config_slug}"
+      fi
+      continue
+    fi
+
+    if [[ "${choice}" =~ ^4[[:space:]]+([0-9]+)$ ]] || [[ "${choice}" =~ ^[Ss][Nn][Aa][Pp][Ss][Hh][Oo][Tt][Ss][[:space:]]+([0-9]+)$ ]]; then
+      if resolve_config_slug_by_index "${BASH_REMATCH[1]}" config_slug; then
+        list_snapshots_with_sizes "${config_slug}"
+      fi
+      continue
+    fi
+
+    if [[ "${choice}" =~ ^5[[:space:]]+([0-9]+)$ ]] || [[ "${choice}" =~ ^[Rr][Ee][Ss][Tt][Oo][Rr][Ee][[:space:]]+([0-9]+)$ ]]; then
+      if resolve_config_slug_by_index "${BASH_REMATCH[1]}" config_slug; then
+        restore_snapshot_to_downloads "${config_slug}"
+      fi
+      continue
+    fi
+
+    if [[ "${choice}" =~ ^6[[:space:]]+([0-9]+)$ ]] || [[ "${choice}" =~ ^[Ff][Oo][Rr][Gg][Ee][Tt][[:space:]]+([0-9]+)$ ]]; then
+      if resolve_config_slug_by_index "${BASH_REMATCH[1]}" config_slug; then
+        run_forget_prune_now "${config_slug}"
+      fi
+      continue
+    fi
+
+    if [[ "${choice}" =~ ^7[[:space:]]+([0-9]+)$ ]] || [[ "${choice}" =~ ^[Ss][Hh][Oo][Ww][[:space:]]+([0-9]+)$ ]]; then
+      if resolve_config_slug_by_index "${BASH_REMATCH[1]}" config_slug; then
+        show_current_config "${config_slug}"
+      fi
       continue
     fi
 
@@ -941,24 +997,6 @@ main_loop() {
         run_setup_flow
         ;;
       2)
-        list_all_configs
-        ;;
-      3)
-        run_backup_now
-        ;;
-      4)
-        list_snapshots_with_sizes
-        ;;
-      5)
-        restore_snapshot_to_downloads
-        ;;
-      6)
-        run_forget_prune_now
-        ;;
-      7)
-        show_current_config
-        ;;
-      8)
         echo "Goodbye."
         exit 0
         ;;
