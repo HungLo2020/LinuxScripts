@@ -27,6 +27,9 @@
 #   --allow-code             Permits arbitrary Python execution inside the
 #                            prompt pipeline.  Do NOT expose port 7861 to an
 #                            untrusted network when this flag is active.
+#   --enable-insecure-extension-access
+#                            Allows extensions broader access. Keep the WebUI
+#                            on trusted networks only when this flag is active.
 # =============================================================================
 
 set -euo pipefail
@@ -345,13 +348,14 @@ fi
 # --no-download-sd-model    do not auto-download the default SD model (we provide ours)
 # --api                 enable the REST API
 # --allow-code          allow arbitrary Python in the prompt processing pipeline
+# --enable-insecure-extension-access  allow insecure extension access
 #
 # CPU-only flags (omitted when a GPU is present):
 # --skip-torch-cuda-test   skip the CUDA smoke test on startup
 # --no-half                run in FP32 (required on CPU; FP16 is GPU-only)
 # --precision full         equivalent to --no-half
 
-WEBUI_ARGS="--listen --port 7860 --disable-safe-unpickle --no-download-sd-model --api --allow-code"
+WEBUI_ARGS="--listen --port 7860 --disable-safe-unpickle --no-download-sd-model --api --allow-code --enable-insecure-extension-access"
 if [[ "${USE_GPU}" == "false" ]]; then
     WEBUI_ARGS="${WEBUI_ARGS} --skip-torch-cuda-test --no-half --precision full"
 fi
