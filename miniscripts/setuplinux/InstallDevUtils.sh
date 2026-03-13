@@ -42,11 +42,12 @@ else
 fi
 
 # Check if intellij-idea is installed via snap
-if snap list intellij-idea >/dev/null 2>&1; then
-  echo "intellij-idea is already installed via snap."
-else
-  echo "Installing intellij-idea via snap..."
-  sudo snap install intellij-idea --classic
-fi
+#if snap list intellij-idea >/dev/null 2>&1; then
+#  echo "intellij-idea is already installed via snap."
+#else
+#  echo "Installing intellij-idea via snap..."
+#  sudo snap install intellij-idea --classic
+#fi
+# I am using vs code now
 
 echo "InstallDevUtils complete."
