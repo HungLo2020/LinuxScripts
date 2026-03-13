@@ -71,8 +71,6 @@ All container scripts follow the same pattern:
 
 ## Linux Setup Scripts (`miniscripts/setuplinux`)
 
-- `AddRepos.sh`  
-	Enables Ubuntu multiverse.
 - `InstallDefaultPackages.sh`  
 	Installs default apt tools (includes `rclone`, `flatpak`, `pipx`, `fastfetch`, etc).
 - `InstallDevUtils.sh`  
@@ -80,7 +78,7 @@ All container scripts follow the same pattern:
 - `InstallFlatpakPackages.sh`  
 	Adds Flathub and installs flatpak apps (Bottles, Flatseal, MissionCenter, Discord).
 - `InstallGamePackages.sh`  
-	Runs `AddRepos.sh`, then installs gaming packages (`steam`, `retroarch`, etc).
+	Installs gaming packages (`steam`, `kmines`) and Basalt.
 - `InstallOfficePackages.sh`  
 	Installs LibreOffice.
 - `InstallVariety.sh`  

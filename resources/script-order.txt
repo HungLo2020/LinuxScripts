@@ -2,7 +2,6 @@
 # You can use either a filename or a path relative to miniscripts/setuplinux.
 
 [first]
-AddRepos.sh
 RDSetup.sh
 SetupSMBMount.sh
 
