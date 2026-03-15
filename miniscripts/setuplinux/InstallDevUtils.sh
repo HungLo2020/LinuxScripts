@@ -17,6 +17,7 @@ packages=(
   "cura"
   "virt-manager"
   "gh"
+  "ripgrep"
 )
 
 echo "Installing apt dev packages..."
