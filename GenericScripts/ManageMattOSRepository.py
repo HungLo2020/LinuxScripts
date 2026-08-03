@@ -22,11 +22,11 @@ Cloudflare/R2 prerequisites
        R2_BUCKET_NAME    matt-apt-repo
        R2_PUBLIC_URL     https://packages.mattsherfey.com
 
-3. Create a separate Bitwarden Secure Note named "MattOS Repository Signing
-   Key". Put the ASCII-armored GPG private key in the note body, or in a custom
-   field named PRIVATE_KEY. If the key is encrypted, put its passphrase in a
-   custom field named PASSPHRASE. The key should be dedicated to repository
-   signing and should not be used for personal email or unrelated work.
+3. The first `init` automatically creates a dedicated repository signing key
+   if the Bitwarden Secure Note named "MattOS Repository Signing Key" does not
+   exist. It stores the ASCII-armored private key in that note and uses the key
+   from a temporary GPG home. No manual key creation is required. If the note
+   already exists, the script uses its PRIVATE_KEY custom field or note body.
 
 4. Install/use the Bitwarden CLI before running commands. The script first
    reuses a valid BW_SESSION when one is present. If no valid session exists,
@@ -41,10 +41,10 @@ Cloudflare/R2 prerequisites
 
 First-time setup
 ----------------
-Run `init` once, after the R2 bucket, R2 Bitwarden item, and signing-key item
-exist. `init` verifies the tools and credentials, creates the initial signed
-trixie/main repository, and publishes its metadata to R2. It does not create
-or build any packages.
+Run `init` once after the R2 bucket and R2 Bitwarden item exist. If the signing
+key item is missing, `init` creates the dedicated key and Secure Note
+automatically. It then creates the initial signed trixie/main repository and
+publishes its metadata to R2. It does not create or build any packages.
 
 Normal package workflow
 -----------------------
@@ -247,10 +247,18 @@ def ensure_bitwarden_session() -> None:
         raise RepositoryError("Bitwarden unlock failed; check the master password")
 
 
-def bitwarden_item(name: str) -> dict[str, Any]:
+def bitwarden_item(name: str, *, required: bool = True) -> dict[str, Any] | None:
     ensure_bitwarden_session()
 
-    result = run_command(["bw", "get", "item", name, "--raw"])
+    result = run_command(["bw", "get", "item", name, "--raw"], check=False)
+    if result.returncode != 0:
+        if not required:
+            return None
+        detail = (result.stderr or result.stdout or "").strip()
+        raise RepositoryError(
+            f"Bitwarden item {name!r} could not be read"
+            + (f": {detail}" if detail else "")
+        )
     try:
         item = json.loads(result.stdout)
     except json.JSONDecodeError as exc:
@@ -277,6 +285,7 @@ def custom_fields(item: dict[str, Any]) -> dict[str, str]:
 
 def get_r2_credentials() -> tuple[str, str, str, str, str]:
     item = bitwarden_item(os.environ.get("MATTOS_R2_ITEM", DEFAULT_R2_ITEM))
+    assert item is not None
     login = item.get("login") or {}
     username = str(login.get("username") or "").strip()
     password = str(login.get("password") or "")
@@ -304,7 +313,66 @@ def get_r2_credentials() -> tuple[str, str, str, str, str]:
     return username, password, endpoint, bucket, public_url
 
 
-def get_gpg_material() -> tuple[str, str | None]:
+def create_signing_key_item() -> tuple[str, str | None]:
+    if not command_exists("gpg"):
+        raise RepositoryError("gpg is required to create the MattOS repository signing key")
+
+    print("No MattOS repository signing key exists in Bitwarden; creating one now...")
+    with tempfile.TemporaryDirectory(prefix="mattos-key-bootstrap-") as temporary:
+        root = Path(temporary)
+        gpg_home = root / "gnupg"
+        gpg_home.mkdir(mode=0o700)
+        env = os.environ.copy()
+        env["GNUPGHOME"] = str(gpg_home)
+        identity = "MattOS Repository Signing Key <packages@mattsherfey.com>"
+        run_command(
+            [
+                "gpg",
+                "--batch",
+                "--pinentry-mode",
+                "loopback",
+                "--passphrase",
+                "",
+                "--quick-gen-key",
+                identity,
+                "rsa4096",
+                "sign",
+                "3y",
+            ],
+            env=env,
+        )
+        fingerprint_result = run_command(
+            ["gpg", "--batch", "--with-colons", "--list-secret-keys"], env=env
+        )
+        fingerprint = ""
+        for line in fingerprint_result.stdout.splitlines():
+            parts = line.split(":")
+            if len(parts) > 9 and parts[0] == "fpr":
+                fingerprint = parts[9]
+                break
+        if not fingerprint:
+            raise RepositoryError("The generated signing key fingerprint could not be found")
+        private_key = run_command(
+            ["gpg", "--batch", "--armor", "--export-secret-keys", fingerprint], env=env
+        ).stdout
+
+    item_name = os.environ.get("MATTOS_GPG_ITEM", DEFAULT_GPG_ITEM)
+    item = {
+        "type": 2,
+        "secureNote": {"type": 0},
+        "name": item_name,
+        "notes": private_key,
+        "fields": [],
+    }
+    encoded = run_command(
+        ["bw", "encode"], input_text=json.dumps(item)
+    ).stdout.strip()
+    run_command(["bw", "create", "item", encoded])
+    print(f"Created Bitwarden Secure Note: {item_name}")
+    return private_key, None
+
+
+def get_gpg_material(*, allow_bootstrap: bool = False) -> tuple[str, str | None]:
     key_file = os.environ.get("MATTOS_GPG_PRIVATE_KEY_FILE")
     pass_file = os.environ.get("MATTOS_GPG_PASSPHRASE_FILE")
     if key_file:
@@ -315,7 +383,17 @@ def get_gpg_material() -> tuple[str, str | None]:
         passphrase = Path(pass_file).read_text(encoding="utf-8") if pass_file else None
         return key_text, passphrase.rstrip("\n") if passphrase else None
 
-    item = bitwarden_item(os.environ.get("MATTOS_GPG_ITEM", DEFAULT_GPG_ITEM))
+    item = bitwarden_item(
+        os.environ.get("MATTOS_GPG_ITEM", DEFAULT_GPG_ITEM),
+        required=False,
+    )
+    if item is None:
+        if allow_bootstrap:
+            return create_signing_key_item()
+        raise RepositoryError(
+            "The MattOS repository signing-key Bitwarden item does not exist. "
+            "Run 'init' once to create it automatically."
+        )
     fields = custom_fields(item)
     notes = item.get("notes") or ""
     key_text = fields.get("PRIVATE_KEY", "") or str(notes)
@@ -575,11 +653,14 @@ def with_repository_workspace(
     remove_version: str | None = None,
 ) -> None:
     client, settings = r2_client(settings)
-    key_text, passphrase = get_gpg_material()
     with tempfile.TemporaryDirectory(prefix="mattos-repo-") as temporary:
         root = Path(temporary) / "repository"
         root.mkdir()
         old_keys = download_remote_repository(client, settings.bucket, root)
+        if action == "init" and old_keys:
+            key_text, passphrase = get_gpg_material()
+        else:
+            key_text, passphrase = get_gpg_material(allow_bootstrap=action == "init")
         existing_packages = [path for path in (root / "pool").rglob("*.deb")]
         staging = Path(temporary) / "packages"
         staging.mkdir()
