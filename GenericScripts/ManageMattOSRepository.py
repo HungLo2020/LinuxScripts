@@ -755,13 +755,22 @@ def package_files(root: Path) -> list[Path]:
     return sorted((root / "pool").rglob("*.deb")) if (root / "pool").exists() else []
 
 
+def fetch_public_bytes(url: str, description: str) -> bytes:
+    last_error: Exception | None = None
+    for attempt in range(4):
+        try:
+            with urllib.request.urlopen(url, timeout=20) as response:
+                return response.read()
+        except (urllib.error.URLError, urllib.error.HTTPError) as exc:
+            last_error = exc
+            if attempt < 3:
+                time.sleep(2**attempt)
+    raise VerificationError(f"{description}: {url}") from last_error
+
+
 def complete_public_verification(r2: R2, config: Config, armored_key: str) -> None:
     url = f"{r2.public_url}/dists/{config.suite}/InRelease"
-    try:
-        with urllib.request.urlopen(url, timeout=20) as response:
-            signed = response.read()
-    except (urllib.error.URLError, urllib.error.HTTPError) as exc:
-        raise VerificationError(f"Public repository endpoint is unreachable: {url}") from exc
+    signed = fetch_public_bytes(url, "Public repository endpoint is unreachable")
     with tempfile.TemporaryDirectory(prefix="mattos-verify-") as temporary:
         root = Path(temporary)
         release_path = root / "InRelease"
@@ -786,11 +795,10 @@ def complete_public_verification(r2: R2, config: Config, armored_key: str) -> No
             digest = hashes.get(release_relative) or hashes.get(release_relative.removesuffix(".gz"))
             if not digest:
                 raise VerificationError(f"Release metadata does not reference {relative}")
-            try:
-                with urllib.request.urlopen(f"{r2.public_url}/{relative}", timeout=20) as response:
-                    content = response.read()
-            except urllib.error.URLError as exc:
-                raise VerificationError(f"Package index is missing: {relative}") from exc
+            content = fetch_public_bytes(
+                f"{r2.public_url}/{relative}",
+                f"Package index is missing: {relative}",
+            )
             if hashlib.sha256(content).hexdigest() != digest:
                 raise VerificationError(f"Package index checksum mismatch: {relative}")
             try:

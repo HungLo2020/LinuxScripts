@@ -149,6 +149,24 @@ class PublicationTests(unittest.TestCase):
             self.assertIn("Architectures: amd64", text)
             self.assertNotIn("Architectures: amd64 all", text)
 
+    @patch.object(repo.time, "sleep")
+    @patch.object(repo.urllib.request, "urlopen")
+    def test_public_fetch_retries_transient_failure(self, urlopen, sleep):
+        class Response:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return None
+
+            def read(self):
+                return b"published"
+
+        response = Response()
+        urlopen.side_effect = [repo.urllib.error.URLError("not propagated"), response]
+        self.assertEqual(repo.fetch_public_bytes("https://example.test/InRelease", "unreachable"), b"published")
+        sleep.assert_called_once_with(1)
+
 
 if __name__ == "__main__":
     unittest.main()
