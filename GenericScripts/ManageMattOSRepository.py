@@ -526,7 +526,10 @@ def package_info(path: Path, repository_architectures: Sequence[str]) -> Package
     if path.suffix != ".deb":
         raise PackageError(f"Package must have a .deb suffix: {path}")
     format_string = "${Package}\\n${Version}\\n${Architecture}\\n"
-    result = run_command(["dpkg-deb", "--showformat=" + format_string, "--", str(path)], error=PackageError)
+    result = run_command(
+        ["dpkg-deb", "--show", "--showformat=" + format_string, "--", str(path)],
+        error=PackageError,
+    )
     values = result.stdout.splitlines()
     if len(values) != 3 or not all(values):
         raise PackageError(f"Package metadata is missing or malformed: {path}")

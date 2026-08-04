@@ -32,6 +32,7 @@ class PackageMetadataTests(unittest.TestCase):
         info = repo.package_info(path, ("amd64",))
         self.assertEqual((info.name, info.version, info.architecture), ("demo", "1.0~rc1-1", "amd64"))
         self.assertIn(str(path), run.call_args.args[0])
+        self.assertIn("--show", run.call_args.args[0])
 
     @patch.object(repo, "run_command")
     def test_architecture_all_is_accepted(self, run):
