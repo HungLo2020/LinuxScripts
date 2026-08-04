@@ -757,15 +757,23 @@ def package_files(root: Path) -> list[Path]:
 
 def fetch_public_bytes(url: str, description: str) -> bytes:
     last_error: Exception | None = None
+    request = urllib.request.Request(
+        url,
+        headers={
+            "User-Agent": "MattOSRepositoryManager/1.0",
+            "Accept": "text/plain, application/octet-stream, */*",
+        },
+    )
     for attempt in range(4):
         try:
-            with urllib.request.urlopen(url, timeout=20) as response:
+            with urllib.request.urlopen(request, timeout=20) as response:
                 return response.read()
         except (urllib.error.URLError, urllib.error.HTTPError) as exc:
             last_error = exc
             if attempt < 3:
                 time.sleep(2**attempt)
-    raise VerificationError(f"{description}: {url}") from last_error
+    detail = f" ({last_error})" if last_error else ""
+    raise VerificationError(f"{description}: {url}{detail}") from last_error
 
 
 def complete_public_verification(r2: R2, config: Config, armored_key: str) -> None:

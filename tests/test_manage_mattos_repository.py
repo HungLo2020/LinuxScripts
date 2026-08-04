@@ -166,6 +166,8 @@ class PublicationTests(unittest.TestCase):
         urlopen.side_effect = [repo.urllib.error.URLError("not propagated"), response]
         self.assertEqual(repo.fetch_public_bytes("https://example.test/InRelease", "unreachable"), b"published")
         sleep.assert_called_once_with(1)
+        request = urlopen.call_args_list[0].args[0]
+        self.assertEqual(request.get_header("User-agent"), "MattOSRepositoryManager/1.0")
 
 
 if __name__ == "__main__":
