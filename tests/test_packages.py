@@ -30,6 +30,17 @@ def load_tailscale_configure_script():
     return module
 
 
+def load_setup_script(name: str):
+    """Load one package setup hook without running its script entry point."""
+
+    path = Path(__file__).resolve().parents[1] / "src" / "scripts" / name
+    specification = importlib.util.spec_from_file_location(path.stem, path)
+    module = importlib.util.module_from_spec(specification)
+    assert specification.loader is not None
+    specification.loader.exec_module(module)
+    return module
+
+
 class PackagePlanningTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -42,7 +53,7 @@ class PackagePlanningTests(unittest.TestCase):
         self.assertEqual(
             [package.name for package in plan.packages],
             [
-                "git", "curl", "ripgrep", "fastfetch", "tailscale", "qdirstat", "baobab", "kate", "konsole", "dolphin",
+                "git", "curl", "ripgrep", "openssh-server", "fastfetch", "tailscale", "qdirstat", "baobab", "kate", "konsole", "dolphin",
                 "flatpak", "mission-center", "rustdesk", "snapd", "bitwarden", "bw", "discord", "variety", "papirus-icon-theme",
                 "github-cli", "npm", "codex-cli", "vscode", "kmines", "steam", "libreoffice", "pipx", "konsave",
             ],
@@ -170,6 +181,33 @@ class PackagePlanningTests(unittest.TestCase):
         self.assertEqual(steps[rustdesk_step - 1].script, "download_rustdesk.py")
         self.assertEqual(steps[rustdesk_step + 1].script, "configure_rustdesk.py")
         self.assertEqual(steps[rustdesk_step].provider, "apt_deb")
+
+    def test_linux_openssh_and_variety_use_post_install_hooks(self):
+        plan = resolve_profiles(["desktop"], self.catalog, self.profiles, "linux", ("apt",))
+        steps = plan_execution_steps(plan.packages, plan.profile_scripts, PackageManager.APT, plan.delete_packages)
+        ssh_step = next(index for index, step in enumerate(steps) if getattr(step, "packages", ()) == ("openssh-server",))
+        variety_step = next(index for index, step in enumerate(steps) if getattr(step, "packages", ()) == ("variety",))
+        self.assertEqual(steps[ssh_step + 1].script, "configure_openssh_server.py")
+        self.assertEqual(steps[variety_step + 1].script, "configure_variety.py")
+
+    def test_openssh_hook_enables_the_legacy_ssh_service(self):
+        configure_openssh = load_setup_script("configure_openssh_server.py")
+        with patch.object(configure_openssh.subprocess, "run") as run_command, patch.object(configure_openssh.os, "geteuid", return_value=1000):
+            run_command.return_value.returncode = 0
+            self.assertEqual(configure_openssh.main(), 0)
+        run_command.assert_called_once_with(("sudo", "systemctl", "enable", "--now", "ssh"), check=False)
+
+    def test_variety_hook_copies_the_repository_template(self):
+        configure_variety = load_setup_script("configure_variety.py")
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "variety.conf"
+            source.write_text("configured=true\n", encoding="utf-8")
+            account = type("Account", (), {"pw_dir": str(root / "home"), "pw_uid": 1000, "pw_gid": 1000})()
+            with patch.object(configure_variety.os, "geteuid", return_value=1000):
+                destination = configure_variety.deploy_configuration(source, account)
+        self.assertEqual(destination.name, "variety.conf")
+        self.assertEqual(destination.parent.name, "variety")
 
     def test_tailscale_hook_skips_interactive_enrollment_when_connected(self):
         configure_tailscale = load_tailscale_configure_script()

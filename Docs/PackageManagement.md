@@ -87,6 +87,8 @@ Script paths are relative to `src/scripts/`. They are shown by `plan`, then run 
 
 `utilities` is a shared command-line profile included by both `desktop` and `server`. On Linux it installs Tailscale through its official APT source and enables `tailscaled`. It skips enrollment when the device is already connected; otherwise it asks for explicit confirmation before opening interactive `tailscale up` authentication. `gui-utilities` is Linux-only and supplies desktop applications, RustDesk unattended/direct-IP configuration, and cleanup of unwanted KDE desktop applications; it is included by `desktop`, but never by `server`. RustDesk obtains its permanent password from the `PCPassword` Bitwarden item by default, or prompts when unavailable; set `BITWARDEN_RUSTDESK_ITEM` to use another item. `base` currently removes unwanted legacy games on Linux, so that cleanup applies to every Linux profile stack. `auth` is also included by `desktop` and `server`, and installs Bitwarden plus the `bw` command-line client on every supported platform.
 
+On Linux, `base` also installs `openssh-server` and enables/starts the `ssh` service after installation. The Linux-only `variety` package installs the bundled `resources/variety.conf` into the invoking user's `~/.config/variety/variety.conf` after APT installs Variety.
+
 ## MattOS
 
 MattOS is detected when its `/etc/os-release` declares `ID=mattos`. It is an APT-based platform, but it does not inherit generic Linux profile sections or package targets. Every MattOS-specific profile package and package target must be declared explicitly.

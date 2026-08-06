@@ -3,5 +3,8 @@ name = "variety"
 description = "Wallpaper manager"
 depends_on = []
 
+[script_dependencies]
+after = ["configure_variety.py"]
+
 [targets.linux.apt]
 id = "variety"
