@@ -31,6 +31,7 @@ from packages.cli import build_command_plan, load_resources, main as package_cli
 from packages.executor import execute_operations
 from packages.planner import PackageResolutionError
 from packages.providers import ProviderPlanningError
+from preflight import run as run_preflight
 from storage_smb import configure_interactively
 from system import PackageManager, detect_active_desktop_environment, detect_installed_desktop_environments, detect_linux_distro, detect_package_manager, detect_package_platform
 
@@ -146,6 +147,12 @@ def main() -> int:
         return package_cli_main(sys.argv[1:])
 
     platform_name, package_manager = print_system_summary()
+    if platform_name in {"linux", "mattos"}:
+        try:
+            run_preflight(REPOSITORY_ROOT)
+        except (OSError, RuntimeError, subprocess.CalledProcessError) as error:
+            print(f"Preflight failed: {error}", file=sys.stderr)
+            return 1
     succeeded = run_package_flow()
     try:
         offer_storage_mount(platform_name, package_manager)

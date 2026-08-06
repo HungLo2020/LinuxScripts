@@ -10,6 +10,8 @@ User-facing Python entry points. Run these from the repository root with the pro
 python3 Tools/Setup.py
 ```
 
+On Linux and MattOS, the interactive flow starts with a guarded preflight. It offers to create or repair the `matt` operator account, grant its sudo membership, and copy the repository to `~/Documents/Repos/LinuxScripts` under that account. Every system change requires its own affirmative answer; an existing checkout at that path is left in place without a relocation prompt. After an approved copy, Setup restarts from the operator-owned checkout as `matt`.
+
 After a successful interactive apply on Linux with APT, it also offers persistent Tailscale SMB storage-mount setup. The service retries indefinitely when Tailscale or the server share is unavailable; see [../Docs/PackageManagement.md](../Docs/PackageManagement.md) for its defaults and credential behavior.
 
 On Linux, the next optional Setup step opens `ServerManager.py`. It can also be run directly for server-only administration:

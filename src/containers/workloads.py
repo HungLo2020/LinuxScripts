@@ -342,6 +342,73 @@ class PortainerWorkload(SingleContainerWorkload):
         return 0
 
 
+class UptimeKumaWorkload(SingleContainerWorkload):
+    """Direct replacement for the legacy droplet Uptime Kuma launcher."""
+
+    name = "uptime-kuma"
+    description = "Uptime Kuma monitoring"
+    container_name = "uptime-kuma"
+    image = "louislam/uptime-kuma:latest"
+    data_root = Path.home() / ".uptime-kuma"
+
+    @property
+    def data_directory(self) -> Path:
+        return self.data_root / "data"
+
+    @property
+    def port(self) -> str:
+        return os.environ.get("UPTIME_KUMA_PORT", "3002")
+
+    def port_in_use(self) -> bool:
+        """Mirror the legacy ss/lsof port check before the first install."""
+
+        if shutil.which("ss"):
+            return subprocess.run(("ss", "-ltn", f"( sport = :{self.port} )"), check=False, capture_output=True).returncode == 0
+        if shutil.which("lsof"):
+            return subprocess.run(("lsof", f"-iTCP:{self.port}", "-sTCP:LISTEN"), check=False, capture_output=True).returncode == 0
+        return False
+
+    def execute(self, action: Action) -> int:
+        docker = Docker()
+        available = docker.ensure_available(action)
+        if not available:
+            remove_data(self.data_root)
+            return 0
+        if action is Action.DELETE:
+            return self.delete(docker)
+        if action is Action.OFF:
+            return self.off(docker)
+        if action is Action.ON:
+            if not docker.image_exists(self.image):
+                raise RuntimeError("Uptime Kuma image is not installed. Run without flags first.")
+            if not self.data_directory.is_dir():
+                raise RuntimeError("Uptime Kuma data directory is not installed. Run without flags first.")
+        elif not docker.container_exists(self.container_name) and self.port_in_use():
+            raise RuntimeError(f"port {self.port} appears to be in use. Set UPTIME_KUMA_PORT to choose another port.")
+
+        self.data_directory.mkdir(parents=True, exist_ok=True)
+        if action is Action.RUN:
+            log("Pulling latest Uptime Kuma image...")
+            docker.run("pull", self.image)
+        if docker.container_running(self.container_name):
+            log(f"uptime-kuma is already running at http://localhost:{self.port}")
+            return 0
+        if docker.container_exists(self.container_name):
+            log("Starting existing uptime-kuma container...")
+            docker.run("start", self.container_name)
+        else:
+            log("Creating and starting uptime-kuma container...")
+            docker.run(
+                "run", "-d", "--name", self.container_name, "--restart", "unless-stopped",
+                "-p", f"{self.port}:3001", "-v", f"{self.data_directory}:/app/data", self.image,
+            )
+        if wait_for_http(f"http://127.0.0.1:{self.port}", 90):
+            log(f"Uptime Kuma is ready at: http://localhost:{self.port}")
+        else:
+            log("Uptime Kuma container started, but readiness check timed out.")
+        return 0
+
+
 class OllamaWorkload(Workload):
     name = "ollama"
     description = "Ollama and Open WebUI"

@@ -35,3 +35,13 @@ Config root: ~/.config/zip-backup-manager
 Each run creates `prefix_YYYY-MM-DD_HH-MM-SS.zip`, validates it with `unzip -tqq`, and writes a `.sha256` sidecar when `sha256sum` is available. Retention preserves the newest archive across the newest 3 daily, 3 ISO-weekly, 3 monthly, and 2 yearly buckets. It removes only archives matching that exact managed naming pattern and removes their checksum sidecars alongside them.
 
 The manager supports multiple configurations, setup/rerun, immediate archive creation, archive listing, manual pruning, unit triggering, status display, and safe configuration deletion. A job runs through a daily persistent systemd timer with up to 30 minutes of randomized delay as the user who created it. If a destination is shared by another configuration, deletion preserves the destination and its archives.
+
+## Uptime Kuma
+
+Server Manager can optionally run the legacy-compatible Uptime Kuma container workload. The direct launcher is:
+
+```bash
+python3 src/containers/run_uptime_kuma.py
+```
+
+It preserves the no-argument install/update/start behavior and `--on`, `--off`, and `-D` lifecycle flags. The container is named `uptime-kuma`, uses `louislam/uptime-kuma:latest`, persists data at `~/.uptime-kuma/data`, and serves the UI at `http://localhost:3002` by default. Set `UPTIME_KUMA_PORT` before running it to select another host port.

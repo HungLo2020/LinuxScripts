@@ -30,6 +30,7 @@ from host import detect_host
 from server.btrfs_snapshots import main as btrfs_main
 from server.restic_backups import main as restic_main
 from server.zip_backups import main as zip_backup_main
+from containers.run_uptime_kuma import main as uptime_kuma_main
 
 
 def ensure_elevated() -> None:
@@ -73,6 +74,12 @@ def zip_backup_action() -> int:
     return zip_backup_main([])
 
 
+def uptime_kuma_action() -> int:
+    """Run the legacy-compatible Uptime Kuma droplet workload."""
+
+    return uptime_kuma_main([])
+
+
 def capabilities() -> tuple[tuple[str, str, Callable[[], int]], ...]:
     """Return modular server capabilities for the interactive menu."""
 
@@ -81,6 +88,7 @@ def capabilities() -> tuple[tuple[str, str, Callable[[], int]], ...]:
         ("Container manager", "Queue Docker workload install, start, stop, or deletion actions", container_manager_action),
         ("Restic backup manager", "Configure, run, restore, and schedule local Restic backup jobs", restic_backup_action),
         ("ZIP backup manager", "Configure, archive, retain, and schedule local ZIP backup jobs", zip_backup_action),
+        ("Uptime Kuma", "Install, start, stop, or remove the Uptime Kuma monitoring container", uptime_kuma_action),
     )
 
 

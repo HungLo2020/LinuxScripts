@@ -31,3 +31,5 @@ The manager is an option in `Tools/ServerManager.py`, but it intentionally runs 
 Homepage copies the templates in `resources/homepage/` on every `run` or `--on`, rewrites loopback HTTP URLs to the active Tailscale IPv4 address, and recreates its container when `HOMEPAGE_ALLOWED_HOSTS` changes. The Jellyfin workload copies `resources/jellyfin/` when creating a stack, remembers media paths, and supports the existing ProtonVPN Bitwarden lookup and NordVPN-to-ProtonVPN migration.
 
 The Stable Diffusion launcher retains the legacy permissive WebUI flags. It should only be exposed on trusted networks and used with model files from trusted sources.
+
+Uptime Kuma remains a Server Manager capability rather than a regular Container Manager workload, matching its legacy droplet-only role. Its direct launcher is `src/containers/run_uptime_kuma.py`, with persistent data under `~/.uptime-kuma/data` and host port `3002` by default.

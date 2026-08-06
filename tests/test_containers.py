@@ -12,7 +12,7 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from containers.workloads import Action, WORKLOADS, StableDiffusionWorkload, parse_action
+from containers.workloads import Action, UptimeKumaWorkload, WORKLOADS, StableDiffusionWorkload, parse_action
 
 
 def load_tool(name: str):
@@ -62,6 +62,23 @@ class ContainerMigrationTests(unittest.TestCase):
         self.assertIn("Btrfs snapshot manager", names)
         self.assertIn("Restic backup manager", names)
         self.assertIn("ZIP backup manager", names)
+        self.assertIn("Uptime Kuma", names)
+
+    def test_uptime_kuma_uses_legacy_container_paths_and_arguments(self):
+        workload = UptimeKumaWorkload()
+        with patch("containers.workloads.Docker") as docker_type, patch("containers.workloads.wait_for_http", return_value=True):
+            docker = docker_type.return_value
+            docker.ensure_available.return_value = True
+            docker.container_exists.return_value = False
+            docker.container_running.return_value = False
+            with patch.object(workload, "port_in_use", return_value=False):
+                workload.execute(Action.RUN)
+        self.assertEqual(workload.data_directory, Path.home() / ".uptime-kuma" / "data")
+        self.assertIn((("pull", "louislam/uptime-kuma:latest"),), docker.run.call_args_list)
+        self.assertIn(
+            (("run", "-d", "--name", "uptime-kuma", "--restart", "unless-stopped", "-p", "3002:3001", "-v", f"{workload.data_directory}:/app/data", "louislam/uptime-kuma:latest"),),
+            docker.run.call_args_list,
+        )
 
 
 if __name__ == "__main__":
