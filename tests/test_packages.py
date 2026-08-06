@@ -7,6 +7,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from packages.catalog import load_catalog, load_package, load_profile, load_profiles
+from packages.cli import build_command_plan
 from packages.models import PackageDefinition, PackageTarget, ProfileDefinition, ProfilePackage, ScriptDependencies, ScriptOperation
 from packages.planner import PackageResolutionError, resolve_profiles
 from packages.providers import plan_execution_steps, plan_provider_operations, preferred_provider
@@ -122,6 +123,18 @@ class PackagePlanningTests(unittest.TestCase):
         self.assertEqual(operations[0].commands[1].argv[:3], ("apt-get", "install", "-y"))
         self.assertIn("pipx", operations[0].commands[1].argv)
 
+    def test_command_plan_builds_from_the_source_cli_module(self):
+        root = Path(__file__).resolve().parents[1]
+        _, platform_name, package_manager, package_plan, _ = build_command_plan(
+            root,
+            ("server",),
+            platform_name="linux",
+            package_manager=PackageManager.APT,
+        )
+        self.assertEqual(platform_name, "linux")
+        self.assertEqual(package_manager, PackageManager.APT)
+        self.assertEqual(package_plan.profiles[-1], "server")
+
     def test_coding_scripts_run_before_profile_and_codex_install(self):
         plan = resolve_profiles(["coding"], self.catalog, self.profiles, "linux", ("apt",))
         steps = plan_execution_steps(plan.packages, plan.profile_scripts, PackageManager.APT)
@@ -135,9 +148,9 @@ class PackagePlanningTests(unittest.TestCase):
     def test_linux_profile_removals_run_after_installations(self):
         plan = resolve_profiles(["gaming"], self.catalog, self.profiles, "linux", ("apt",))
         self.assertEqual(plan.delete_packages, (
+            "kmahjongg", "kpat", "ksudoku", "katawa-shoujo",
             "plasma-vault", "krdc", "neochat", "konversation", "skanlite", "akregator", "dragonplayer", "gimp",
             "juk", "kdeconnect", "kmail", "kmouth", "konqueror", "korganizer", "kwrite", "anydesk",
-            "kmahjongg", "kpat", "ksudoku", "katawa-shoujo",
         ))
         steps = plan_execution_steps(plan.packages, plan.profile_scripts, PackageManager.APT, plan.delete_packages)
         self.assertEqual(steps[-1].packages, plan.delete_packages)

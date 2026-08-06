@@ -1,0 +1,126 @@
+#!/usr/bin/env python3
+"""Interactively inspect this host, select a package profile, and apply it."""
+
+from __future__ import annotations
+
+import os
+import sys
+from pathlib import Path
+
+
+REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
+SOURCE_DIRECTORY = REPOSITORY_ROOT / "src"
+
+
+def use_project_interpreter() -> None:
+    """Re-execute with the bootstrapped virtual environment when available."""
+
+    venv_python = REPOSITORY_ROOT / (".venv/Scripts/python.exe" if os.name == "nt" else ".venv/bin/python")
+    if venv_python.is_file() and Path(sys.executable).resolve() != venv_python.resolve():
+        os.execv(str(venv_python), (str(venv_python), *sys.argv))
+
+
+use_project_interpreter()
+
+if str(SOURCE_DIRECTORY) not in sys.path:
+    sys.path.insert(0, str(SOURCE_DIRECTORY))
+
+from host import detect_host
+from packages.cli import build_command_plan, load_resources, main as package_cli_main, print_plan
+from packages.executor import execute_operations
+from packages.planner import PackageResolutionError
+from packages.providers import ProviderPlanningError
+from system import detect_active_desktop_environment, detect_installed_desktop_environments, detect_linux_distro, detect_package_manager, detect_package_platform
+
+
+def prompt_yes_no(question: str) -> bool:
+    """Return True only for an explicit affirmative response."""
+
+    try:
+        return input(f"{question} [y/N]: ").strip().lower() in {"y", "yes"}
+    except EOFError:
+        return False
+
+
+def print_system_summary() -> None:
+    """Show host facts that determine profile and provider selection."""
+
+    host = detect_host()
+    distro = detect_linux_distro() if host.system == "linux" else None
+    package_manager = detect_package_manager(distro) if distro is not None else None
+    active_desktop = detect_active_desktop_environment()
+    installed_desktops = detect_installed_desktop_environments() if host.system == "linux" else ()
+
+    print("LinuxScripts Setup")
+    print("=" * 18)
+    print(f"Operating system: {host.system}")
+    print(f"Architecture: {host.architecture} ({host.machine})")
+    if distro is not None:
+        version = f" {distro.version_id}" if distro.version_id else ""
+        print(f"Distribution: {distro.name}{version}")
+    print(f"Package platform: {detect_package_platform(host, distro)}")
+    print(f"Package manager: {package_manager.value if package_manager else 'not detected'}")
+    print(f"Active desktop: {active_desktop or 'not detected'}")
+    print(f"Installed desktops: {', '.join(installed_desktops) if installed_desktops else 'not detected'}")
+    print()
+
+
+def choose_profile(profiles) -> str | None:
+    """Display a numbered profile menu and return the selected profile name."""
+
+    choices = tuple(sorted(profiles.values(), key=lambda profile: profile.name))
+    print("Available profiles:")
+    for index, profile in enumerate(choices, start=1):
+        print(f"  {index}. {profile.name} - {profile.description}")
+
+    while True:
+        try:
+            entered = input("Select a profile by number, or press Enter to cancel: ").strip()
+        except EOFError:
+            return None
+        if not entered:
+            return None
+        if entered.isdigit() and 1 <= int(entered) <= len(choices):
+            return choices[int(entered) - 1].name
+        print("Enter one of the listed profile numbers.")
+
+
+def main() -> int:
+    """Run the interactive setup flow or forward a package subcommand."""
+
+    if len(sys.argv) > 1:
+        return package_cli_main(sys.argv[1:])
+
+    print_system_summary()
+    if not prompt_yes_no("Choose and apply a package profile?"):
+        print("No changes were made.")
+        return 0
+
+    _, profiles = load_resources(REPOSITORY_ROOT)
+    profile_name = choose_profile(profiles)
+    if profile_name is None:
+        print("No changes were made.")
+        return 0
+
+    try:
+        result = build_command_plan(REPOSITORY_ROOT, (profile_name,))
+    except (PackageResolutionError, ProviderPlanningError, RuntimeError, ValueError) as error:
+        print(f"Error: {error}", file=sys.stderr)
+        return 1
+
+    print()
+    print_plan(*result)
+    if not prompt_yes_no("Apply this plan now?"):
+        print("Plan was not applied.")
+        return 0
+
+    execute_operations(result[-1], REPOSITORY_ROOT)
+    return 0
+
+
+if __name__ == "__main__":
+    try:
+        raise SystemExit(main())
+    except KeyboardInterrupt:
+        print("\nSetup cancelled.")
+        raise SystemExit(130) from None

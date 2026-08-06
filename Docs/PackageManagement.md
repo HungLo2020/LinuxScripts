@@ -1,17 +1,18 @@
 # Package Management
 
-`Tools/manage_packages.py` plans and installs named package profiles from TOML resources.
+`Tools/Setup.py` is the package-management entry point for TOML profile resources. Without arguments, it presents an interactive terminal interface that shows detected host details, lets you select one profile, prints its plan, and requires confirmation before applying it.
 
 ## Commands
 
 ```bash
-python3 Tools/manage_packages.py profiles
-python3 Tools/manage_packages.py plan complete-desktop
-python3 Tools/manage_packages.py plan complete-desktop --platform windows
-python3 Tools/manage_packages.py apply complete-desktop --yes
+python3 Tools/Setup.py
+python3 Tools/Setup.py profiles
+python3 Tools/Setup.py plan complete-desktop
+python3 Tools/Setup.py plan complete-desktop --platform windows
+python3 Tools/Setup.py apply complete-desktop --yes
 ```
 
-`plan` never changes the host. `apply` prints the same plan and requires `--yes` before it executes provider commands.
+`plan` never changes the host. `apply` prints the same plan and requires `--yes` before it executes provider commands. The interactive interface also prints the plan and asks for an explicit confirmation before it runs provider commands.
 
 `--platform` and `--package-manager` are available only on `plan` for safe cross-platform previews. `apply` always detects the local host so it cannot execute another platform's provider commands.
 
@@ -80,7 +81,7 @@ after = []
 
 Script paths are relative to `src/scripts/`. They are shown by `plan`, then run only during `apply --yes` with the project Python interpreter. Package installs without hooks remain batched; a package with hooks gets its own provider operation so its declared order is preserved.
 
-`utilities` is a shared command-line profile included by both `desktop` and `server`. `gui-utilities` is Linux-only and supplies desktop applications plus cleanup of unwanted KDE desktop applications; it is included by `desktop`, but never by `server`. `gaming` cleans up unwanted legacy games on Linux. `auth` is also included by `desktop` and `server`, and installs Bitwarden plus the `bw` command-line client on every supported platform.
+`utilities` is a shared command-line profile included by both `desktop` and `server`. `gui-utilities` is Linux-only and supplies desktop applications plus cleanup of unwanted KDE desktop applications; it is included by `desktop`, but never by `server`. `base` currently removes unwanted legacy games on Linux, so that cleanup applies to every Linux profile stack. `auth` is also included by `desktop` and `server`, and installs Bitwarden plus the `bw` command-line client on every supported platform.
 
 ## MattOS
 
@@ -99,7 +100,7 @@ id = "mattos-control-center"
 
 Declare only the provider targets that actually distribute a package. For example, a MattOS APT-only package needs only `[targets.mattos.apt]`; it must not include placeholder DNF, Pacman, or generic Linux targets. Likewise, `[platforms.linux]` entries do not apply on MattOS. If a required package is requested with an incompatible native package manager, planning fails clearly, for example: `Package 'basalt' is not available for the dnf package manager on mattos.`
 
-Use `python3 Tools/manage_packages.py plan complete-desktop --platform mattos` to preview a MattOS plan on another machine. A MattOS host selects this platform automatically.
+Use `python3 Tools/Setup.py plan complete-desktop --platform mattos` to preview a MattOS plan on another machine. A MattOS host selects this platform automatically.
 
 ## Providers
 

@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 
+# Bootstrap the project-local Python environment on macOS. Homebrew is used
+# only when Python 3.10 or newer is not already available.
 set -euo pipefail
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

@@ -1,6 +1,8 @@
 [CmdletBinding()]
 param()
 
+# Bootstrap the project-local Python environment on native Windows.
+# It installs Python through Winget only when a supported interpreter is absent.
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 

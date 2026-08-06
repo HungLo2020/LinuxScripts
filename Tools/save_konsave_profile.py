@@ -101,6 +101,7 @@ def main() -> int:
     host = detect_host()
     print(f"Detected host: {host.system}/{host.architecture}")
 
+    # Konsave setup has not yet been migrated from the legacy helper.
     setup_script = repository_root / "Deprecated" / "miniscripts" / "notautorun" / "KonsaveSetup.sh"
     if not setup_script.is_file():
         raise RuntimeError(f"Konsave setup helper script not found: {setup_script}")
