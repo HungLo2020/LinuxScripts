@@ -198,10 +198,48 @@ def plan_provider_operations(
     return tuple(operations)
 
 
+def plan_removal_operations(
+    delete_packages: Iterable[str],
+    package_manager: PackageManager | None,
+) -> tuple[ProviderOperation, ...]:
+    """Build guarded removal commands for provider package identifiers."""
+
+    identifiers = tuple(delete_packages)
+    if not identifiers:
+        return ()
+    if package_manager is not PackageManager.APT:
+        raise ProviderPlanningError("Profile package removals currently require an apt-based Linux distribution.")
+    return (
+        ProviderOperation(
+            "apt",
+            identifiers,
+            (
+                CommandSpec(
+                    (
+                        "bash",
+                        "-c",
+                        "for package; do "
+                        "if apt-cache show \"$package\" >/dev/null 2>&1 "
+                        "&& dpkg-query -W -f='${db:Status-Status}' \"$package\" 2>/dev/null | grep -qx installed; then "
+                        "apt-get remove -y \"$package\"; "
+                        "fi; "
+                        "done",
+                        "remove-profile-packages",
+                        *identifiers,
+                    ),
+                    "Remove installed APT packages requested by profiles",
+                    elevated=True,
+                ),
+            ),
+        ),
+    )
+
+
 def plan_execution_steps(
     packages: Iterable[ResolvedPackage],
     profile_scripts: Iterable[str],
     package_manager: PackageManager | None,
+    delete_packages: Iterable[str] = (),
 ) -> tuple[ProviderOperation | ScriptOperation, ...]:
     """Build execution steps while honoring profile and package script boundaries."""
 
@@ -232,4 +270,5 @@ def plan_execution_steps(
             for script in definition_scripts.after
         )
     flush_pending()
+    steps.extend(plan_removal_operations(delete_packages, package_manager))
     return tuple(steps)

@@ -4,3 +4,6 @@ description = "Cross-platform command-line essentials"
 includes = []
 required_packages = ["git", "curl", "ripgrep"]
 optional_packages = []
+
+[platforms.linux]
+delete_packages = ["kmahjongg", "kpat", "ksudoku", "katawa-shoujo"]

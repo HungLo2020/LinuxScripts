@@ -63,10 +63,11 @@ def _expand_profiles(
     requested_profiles: Sequence[str],
     profiles: Mapping[str, ProfileDefinition],
     platform_name: str,
-) -> tuple[tuple[str, ...], tuple[tuple[str, bool], ...], tuple[str, ...]]:
+) -> tuple[tuple[str, ...], tuple[tuple[str, bool], ...], tuple[str, ...], tuple[str, ...]]:
     expanded: list[str] = []
     requested_packages: dict[str, bool] = {}
     profile_scripts: dict[str, None] = {}
+    delete_packages: dict[str, None] = {}
     visiting: set[str] = set()
     visited: set[str] = set()
 
@@ -90,10 +91,12 @@ def _expand_profiles(
         platform_packages = profile.platform_packages.get(platform_name, ())
         for package in (*profile.packages, *platform_packages):
             requested_packages[package.name] = requested_packages.get(package.name, False) or package.required
+        for package_name in profile.platform_delete_packages.get(platform_name, ()):
+            delete_packages[package_name] = None
 
     for profile_name in requested_profiles:
         visit(profile_name)
-    return tuple(expanded), tuple(requested_packages.items()), tuple(profile_scripts)
+    return tuple(expanded), tuple(requested_packages.items()), tuple(profile_scripts), tuple(delete_packages)
 
 
 def resolve_profiles(
@@ -105,7 +108,11 @@ def resolve_profiles(
 ) -> PackagePlan:
     """Resolve profile and package dependencies in install order for one platform."""
 
-    expanded_profiles, requested_packages, profile_scripts = _expand_profiles(requested_profiles, profiles, platform_name)
+    expanded_profiles, requested_packages, profile_scripts, delete_packages = _expand_profiles(
+        requested_profiles,
+        profiles,
+        platform_name,
+    )
     resolved: list[ResolvedPackage] = []
     skipped: dict[str, str] = {}
     visiting: set[str] = set()
@@ -150,4 +157,10 @@ def resolve_profiles(
     for package_name, required in requested_packages:
         visit(package_name, required)
 
-    return PackagePlan(expanded_profiles, tuple(resolved), skipped, profile_scripts)
+    installed_identifiers = {package.target.identifier for package in resolved}
+    conflicting_packages = sorted(installed_identifiers.intersection(delete_packages))
+    if conflicting_packages:
+        names = ", ".join(conflicting_packages)
+        raise PackageResolutionError(f"Profiles both install and delete package identifiers: {names}")
+
+    return PackagePlan(expanded_profiles, tuple(resolved), skipped, profile_scripts, delete_packages)

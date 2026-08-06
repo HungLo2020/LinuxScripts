@@ -132,6 +132,17 @@ class PackagePlanningTests(unittest.TestCase):
         self.assertIsInstance(steps[codex_step - 1], ScriptOperation)
         self.assertEqual(steps[codex_step - 1].description, "Run pre-install script for 'codex-cli': hello_world.py")
 
+    def test_linux_profile_removals_run_after_installations(self):
+        plan = resolve_profiles(["gaming"], self.catalog, self.profiles, "linux", ("apt",))
+        self.assertEqual(plan.delete_packages, (
+            "plasma-vault", "krdc", "neochat", "konversation", "skanlite", "akregator", "dragonplayer", "gimp",
+            "juk", "kdeconnect", "kmail", "kmouth", "konqueror", "korganizer", "kwrite", "anydesk",
+            "kmahjongg", "kpat", "ksudoku", "katawa-shoujo",
+        ))
+        steps = plan_execution_steps(plan.packages, plan.profile_scripts, PackageManager.APT, plan.delete_packages)
+        self.assertEqual(steps[-1].packages, plan.delete_packages)
+        self.assertEqual(steps[-1].commands[0].argv[:2], ("bash", "-c"))
+
     def test_catalog_rejects_unknown_resource_fields(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

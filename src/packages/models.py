@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Mapping
 
 
@@ -54,6 +54,7 @@ class ProfileDefinition:
     packages: tuple[ProfilePackage, ...]
     platform_packages: Mapping[str, tuple[ProfilePackage, ...]]
     script_dependencies: tuple[str, ...]
+    platform_delete_packages: Mapping[str, tuple[str, ...]] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -73,6 +74,7 @@ class PackagePlan:
     packages: tuple[ResolvedPackage, ...]
     skipped: Mapping[str, str]
     profile_scripts: tuple[str, ...]
+    delete_packages: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)

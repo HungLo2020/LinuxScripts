@@ -78,7 +78,12 @@ def resolve_command_plan(args: argparse.Namespace):
 
     provider_preferences = (preferred_provider(package_manager),) if package_manager else ()
     package_plan = resolve_profiles(args.profiles, catalog, profiles, platform_name, provider_preferences)
-    operations = plan_execution_steps(package_plan.packages, package_plan.profile_scripts, package_manager)
+    operations = plan_execution_steps(
+        package_plan.packages,
+        package_plan.profile_scripts,
+        package_manager,
+        package_plan.delete_packages,
+    )
     validate_script_dependencies(operations, repository_root)
     return host, platform_name, package_manager, package_plan, operations
 

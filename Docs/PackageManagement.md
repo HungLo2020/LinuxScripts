@@ -40,6 +40,7 @@ optional_packages = []
 [platforms.linux]
 required_packages = ["flatpak", "konsave"]
 optional_packages = []
+delete_packages = ["unwanted-desktop-package"]
 ```
 
 Packages can have global dependencies, and each target can add dependencies that apply only to that platform/provider:
@@ -58,7 +59,7 @@ depends_on = ["flatpak"]
 id = "Discord.Discord"
 ```
 
-Each profile and platform table has `required_packages` and `optional_packages` arrays. A package cannot appear in both arrays within the same table. The resolver expands profile includes, adds common packages and packages from the matching `[platforms.<os>]` table, selects a target for the requested platform, resolves package dependencies before dependents, removes duplicates, and rejects profile or package cycles. Platform-specific profile packages are not requested on other operating systems. Required packages with no compatible target fail the plan. Optional packages are listed as skipped; the resolver never substitutes an incompatible native Linux package manager.
+Each profile and platform table has `required_packages` and `optional_packages` arrays. A package cannot appear in both arrays within the same table. Platform tables can also declare `delete_packages`: native provider package identifiers that should be removed after all profile installations. The initial implementation supports guarded APT removals, skipping identifiers that are unavailable or not installed. The resolver expands profile includes, adds common packages and packages from the matching `[platforms.<os>]` table, selects a target for the requested platform, resolves package dependencies before dependents, removes duplicates, and rejects profile or package cycles. Platform-specific profile packages are not requested on other operating systems. Required packages with no compatible target fail the plan. Optional packages are listed as skipped; the resolver never substitutes an incompatible native Linux package manager.
 
 Catalog and profile resources are strict: unknown top-level tables, fields, platforms, providers, and provider options fail during loading. This prevents a misspelled TOML field from silently changing an installation plan.
 
@@ -79,7 +80,7 @@ after = []
 
 Script paths are relative to `src/scripts/`. They are shown by `plan`, then run only during `apply --yes` with the project Python interpreter. Package installs without hooks remain batched; a package with hooks gets its own provider operation so its declared order is preserved.
 
-`utilities` is a shared profile included by both `desktop` and `server`. Its current package list is Linux-only, so it contributes no packages to Windows, macOS, or MattOS. `auth` is also included by `desktop` and `server`, and installs Bitwarden plus the `bw` command-line client on every supported platform.
+`utilities` is a shared command-line profile included by both `desktop` and `server`. `gui-utilities` is Linux-only and supplies desktop applications plus cleanup of unwanted KDE desktop applications; it is included by `desktop`, but never by `server`. `gaming` cleans up unwanted legacy games on Linux. `auth` is also included by `desktop` and `server`, and installs Bitwarden plus the `bw` command-line client on every supported platform.
 
 ## MattOS
 
