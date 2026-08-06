@@ -10,6 +10,8 @@ User-facing Python entry points. Run these from the repository root with the pro
 python3 Tools/Setup.py
 ```
 
+After a successful interactive apply on Linux with APT, it also offers persistent Tailscale SMB storage-mount setup. The service retries indefinitely when Tailscale or the server share is unavailable; see [../Docs/PackageManagement.md](../Docs/PackageManagement.md) for its defaults and credential behavior.
+
 It also forwards non-interactive commands to the implementation in `src/packages/cli.py`:
 
 ```bash

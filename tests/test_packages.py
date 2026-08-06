@@ -13,6 +13,7 @@ from packages.cli import build_command_plan
 from packages.models import PackageDefinition, PackageTarget, ProfileDefinition, ProfilePackage, ScriptDependencies, ScriptOperation
 from packages.planner import PackageResolutionError, resolve_profiles
 from packages.providers import plan_execution_steps, plan_provider_operations, preferred_provider
+from storage_smb import LEGACY_HELPER_PATH, MountConfiguration, retire_legacy_implementation, service_contents, sudo
 from host import HostPlatform
 from system import LinuxDistro, PackageManager, detect_package_platform
 
@@ -181,6 +182,28 @@ class PackagePlanningTests(unittest.TestCase):
             self.assertEqual(configure_tailscale.main(), 0)
         self.assertEqual(run_command.call_count, 1)
         confirm_enrollment.assert_not_called()
+
+    def test_storage_mount_service_retries_the_python_helper(self):
+        configuration = MountConfiguration("100.72.33.98", "storage", "/mnt/storage", "/etc/samba/credentials-storage-matt", 1000, 1000)
+        self.assertEqual(configuration.server, "100.72.33.98")
+        unit = service_contents()
+        self.assertIn("ExecStart=/usr/bin/python3 /usr/local/lib/linuxscripts/storage_smb_mount.py --mount --config /etc/linuxscripts/storage-smb-mount.json", unit)
+        self.assertIn("Restart=on-failure", unit)
+        self.assertIn("RestartSec=20", unit)
+        self.assertIn("StartLimitIntervalSec=0", unit)
+
+    def test_storage_mount_retires_legacy_helper_without_removing_active_credentials(self):
+        with patch("storage_smb.sudo") as run_privileged:
+            retire_legacy_implementation("matt", Path("/etc/samba/credentials-storage-matt"))
+        commands = [call.args[0] for call in run_privileged.call_args_list]
+        self.assertIn(("systemctl", "disable", "--now", "storage-smb-mount.service"), commands)
+        self.assertIn(("rm", "-f", str(LEGACY_HELPER_PATH)), commands)
+        self.assertNotIn(("rm", "-f", "/etc/samba/credentials-storage-matt"), commands)
+
+    def test_storage_mount_privilege_wrapper_allows_nonfatal_commands(self):
+        with patch("storage_smb.subprocess.run") as run_command:
+            sudo(("systemctl", "disable", "--now", "storage-smb-mount.service"), check=False)
+        self.assertFalse(run_command.call_args.kwargs["check"])
 
     def test_linux_profile_removals_run_after_installations(self):
         plan = resolve_profiles(["gaming"], self.catalog, self.profiles, "linux", ("apt",))

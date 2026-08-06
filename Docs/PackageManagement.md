@@ -14,6 +14,8 @@ python3 Tools/Setup.py apply complete-desktop --yes
 
 `plan` never changes the host. `apply` prints the same plan and requires `--yes` before it executes provider commands. The interactive interface also prints the plan and asks for an explicit confirmation before it runs provider commands.
 
+On Linux with APT, interactive Setup always continues to offer the persistent Tailscale SMB storage mount after the package-profile step, even when package installation is skipped. It defaults to `//100.72.33.98/storage` at `/mnt/storage`, prompts for any changed values and the SMB password, and can retrieve the password from Bitwarden item `PCPassword` (override with `SMB_BITWARDEN_ITEM`). The generated root-owned systemd service waits for an online Tailscale node and retries every 20 seconds indefinitely when the share or network is unavailable. Setup retires the legacy shell helper at `/usr/local/sbin/storage-smb-mount.sh` and replaces the shared service unit without unmounting an active matching share. This option is not available through non-interactive `apply`, on MattOS, or on non-APT platforms.
+
 `--platform` and `--package-manager` are available only on `plan` for safe cross-platform previews. `apply` always detects the local host so it cannot execute another platform's provider commands.
 
 ## Bootstrap

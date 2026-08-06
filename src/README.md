@@ -5,6 +5,7 @@ Shared Python implementation for the command-line tools.
 | Path | Responsibility |
 | --- | --- |
 | `packages/` | Strict TOML loading, profile resolution, provider command planning, execution, and the Setup command implementation. |
+| `storage_smb.py` | Linux/APT interactive setup and root-owned systemd helper for the persistent Tailscale CIFS mount. |
 | `konsave/` | Local Konsave profile import/apply and GitHub Release synchronization. |
 | `scripts/` | Python dependencies invoked by package/profile hooks. |
 | `host.py`, `system.py` | Host, distribution, platform, and package-manager detection. |

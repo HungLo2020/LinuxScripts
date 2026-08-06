@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -30,7 +31,8 @@ from packages.cli import build_command_plan, load_resources, main as package_cli
 from packages.executor import execute_operations
 from packages.planner import PackageResolutionError
 from packages.providers import ProviderPlanningError
-from system import detect_active_desktop_environment, detect_installed_desktop_environments, detect_linux_distro, detect_package_manager, detect_package_platform
+from storage_smb import configure_interactively
+from system import PackageManager, detect_active_desktop_environment, detect_installed_desktop_environments, detect_linux_distro, detect_package_manager, detect_package_platform
 
 
 def prompt_yes_no(question: str) -> bool:
@@ -42,7 +44,7 @@ def prompt_yes_no(question: str) -> bool:
         return False
 
 
-def print_system_summary() -> None:
+def print_system_summary() -> tuple[str, PackageManager | None]:
     """Show host facts that determine profile and provider selection."""
 
     host = detect_host()
@@ -63,6 +65,7 @@ def print_system_summary() -> None:
     print(f"Active desktop: {active_desktop or 'not detected'}")
     print(f"Installed desktops: {', '.join(installed_desktops) if installed_desktops else 'not detected'}")
     print()
+    return detect_package_platform(host, distro), package_manager
 
 
 def choose_profile(profiles) -> str | None:
@@ -85,37 +88,63 @@ def choose_profile(profiles) -> str | None:
         print("Enter one of the listed profile numbers.")
 
 
+def offer_storage_mount(platform_name: str, package_manager: PackageManager | None) -> None:
+    """Offer the Linux/APT-only persistent SMB mount after package installation."""
+
+    if platform_name != "linux" or package_manager is not PackageManager.APT:
+        return
+    if not prompt_yes_no("Configure the persistent Tailscale SMB storage mount?"):
+        return
+    configure_interactively()
+
+
+def run_package_flow() -> bool:
+    """Offer one package profile without ending later interactive setup steps."""
+
+    if not prompt_yes_no("Choose and apply a package profile?"):
+        print("Skipping package profile setup.")
+        return True
+
+    _, profiles = load_resources(REPOSITORY_ROOT)
+    profile_name = choose_profile(profiles)
+    if profile_name is None:
+        print("Skipping package profile setup.")
+        return True
+
+    try:
+        result = build_command_plan(REPOSITORY_ROOT, (profile_name,))
+    except (PackageResolutionError, ProviderPlanningError, RuntimeError, ValueError) as error:
+        print(f"Package setup failed: {error}", file=sys.stderr)
+        return False
+
+    print()
+    print_plan(*result)
+    if not prompt_yes_no("Apply this plan now?"):
+        print("Package plan was not applied.")
+        return True
+
+    try:
+        execute_operations(result[-1], REPOSITORY_ROOT)
+    except (OSError, RuntimeError, subprocess.CalledProcessError) as error:
+        print(f"Package setup failed: {error}", file=sys.stderr)
+        return False
+    return True
+
+
 def main() -> int:
     """Run the interactive setup flow or forward a package subcommand."""
 
     if len(sys.argv) > 1:
         return package_cli_main(sys.argv[1:])
 
-    print_system_summary()
-    if not prompt_yes_no("Choose and apply a package profile?"):
-        print("No changes were made.")
-        return 0
-
-    _, profiles = load_resources(REPOSITORY_ROOT)
-    profile_name = choose_profile(profiles)
-    if profile_name is None:
-        print("No changes were made.")
-        return 0
-
+    platform_name, package_manager = print_system_summary()
+    succeeded = run_package_flow()
     try:
-        result = build_command_plan(REPOSITORY_ROOT, (profile_name,))
-    except (PackageResolutionError, ProviderPlanningError, RuntimeError, ValueError) as error:
-        print(f"Error: {error}", file=sys.stderr)
-        return 1
-
-    print()
-    print_plan(*result)
-    if not prompt_yes_no("Apply this plan now?"):
-        print("Plan was not applied.")
-        return 0
-
-    execute_operations(result[-1], REPOSITORY_ROOT)
-    return 0
+        offer_storage_mount(platform_name, package_manager)
+    except (OSError, RuntimeError, subprocess.CalledProcessError) as error:
+        print(f"Storage mount setup failed: {error}", file=sys.stderr)
+        succeeded = False
+    return 0 if succeeded else 1
 
 
 if __name__ == "__main__":
