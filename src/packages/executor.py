@@ -8,7 +8,7 @@ from pathlib import Path
 from collections.abc import Iterable
 
 from packages.models import CommandSpec, ProviderOperation, ScriptOperation
-from process import require_command, run_command
+from process import find_command, require_command, run_command
 
 
 def _command_with_privileges(command: CommandSpec) -> tuple[str, ...]:
@@ -22,6 +22,47 @@ def _script_path(repository_root: Path, script: str) -> Path:
     if not path.is_file():
         raise RuntimeError(f"Dependency script does not exist: {path}")
     return path
+
+
+def _refresh_windows_path() -> None:
+    """Load persisted Windows PATH entries after an installer updates them."""
+
+    if os.name != "nt":
+        return
+
+    import winreg
+
+    entries = os.environ.get("PATH", "").split(os.pathsep)
+    for hive, key in ((winreg.HKEY_LOCAL_MACHINE, r"SYSTEM\CurrentControlSet\Control\Session Manager\Environment"), (winreg.HKEY_CURRENT_USER, "Environment")):
+        try:
+            with winreg.OpenKey(hive, key) as environment_key:
+                value, _ = winreg.QueryValueEx(environment_key, "Path")
+        except OSError:
+            continue
+        entries.extend(os.path.expandvars(value).split(os.pathsep))
+
+    unique_entries = list(dict.fromkeys(entry for entry in entries if entry))
+    os.environ["PATH"] = os.pathsep.join(unique_entries)
+
+
+def _prepare_provider(provider: str) -> None:
+    if os.name != "nt":
+        return
+
+    _refresh_windows_path()
+    if provider != "npm" or find_command("npm") is not None:
+        return
+
+    for variable, relative_path in (("ProgramFiles", "nodejs"), ("LOCALAPPDATA", "Programs\\nodejs")):
+        base_path = os.environ.get(variable)
+        if base_path is None:
+            continue
+        candidate = str(Path(base_path) / relative_path)
+        if Path(candidate).is_dir():
+            os.environ["PATH"] = os.environ["PATH"] + os.pathsep + candidate
+
+    if find_command("npm") is None:
+        raise RuntimeError("npm was not found after installing Node.js. Close and reopen PowerShell, then rerun the package apply command.")
 
 
 def validate_script_dependencies(operations: Iterable[ProviderOperation | ScriptOperation], repository_root: Path) -> None:
@@ -41,6 +82,7 @@ def execute_operations(operations: Iterable[ProviderOperation | ScriptOperation]
             print(operation.description)
             run_command((sys.executable, str(script)), cwd=repository_root)
             continue
+        _prepare_provider(operation.provider)
         print(f"Provider: {operation.provider} ({', '.join(operation.packages)})")
         for command in operation.commands:
             print(f"  {command.description}")

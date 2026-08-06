@@ -1,0 +1,10 @@
+[profile]
+name = "gui-utilities"
+description = "Shared graphical system utilities"
+includes = []
+required_packages = []
+optional_packages = []
+
+[platforms.linux]
+required_packages = ["qdirstat", "baobab", "kate", "konsole", "dolphin", "mission-center"]
+optional_packages = []

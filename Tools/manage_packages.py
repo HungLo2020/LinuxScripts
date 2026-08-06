@@ -4,11 +4,25 @@
 from __future__ import annotations
 
 import argparse
+import os
 import shlex
 import sys
 from pathlib import Path
 
-SOURCE_DIRECTORY = Path(__file__).resolve().parents[1] / "src"
+REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
+SOURCE_DIRECTORY = REPOSITORY_ROOT / "src"
+
+
+def use_project_interpreter() -> None:
+    """Re-execute with the bootstrapped virtual environment when it exists."""
+
+    venv_python = REPOSITORY_ROOT / ".venv" / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    if venv_python.is_file() and Path(sys.executable).resolve() != venv_python.resolve():
+        os.execv(str(venv_python), (str(venv_python), *sys.argv))
+
+
+use_project_interpreter()
+
 if str(SOURCE_DIRECTORY) not in sys.path:
     sys.path.insert(0, str(SOURCE_DIRECTORY))
 
@@ -30,13 +44,14 @@ def parse_args() -> argparse.Namespace:
     for command_name, help_text in (("plan", "Display a package plan without changing the system."), ("apply", "Apply a package plan.")):
         command = subcommands.add_parser(command_name, help=help_text)
         command.add_argument("profiles", nargs="+", help="One or more profile names to resolve.")
-        command.add_argument("--platform", choices=("linux", "mattos", "windows", "macos"), help="Override the detected platform for planning.")
-        command.add_argument(
-            "--package-manager",
-            choices=tuple(manager.value for manager in PackageManager),
-            help="Override the detected Linux package manager for planning.",
-        )
-        if command_name == "apply":
+        if command_name == "plan":
+            command.add_argument("--platform", choices=("linux", "mattos", "windows", "macos"), help="Override the detected platform for planning.")
+            command.add_argument(
+                "--package-manager",
+                choices=tuple(manager.value for manager in PackageManager),
+                help="Override the detected Linux package manager for planning.",
+            )
+        else:
             command.add_argument("--yes", action="store_true", help="Required acknowledgement before executing the plan.")
     return parser.parse_args()
 
@@ -55,8 +70,9 @@ def resolve_command_plan(args: argparse.Namespace):
     repository_root = find_repository_root(Path(__file__).parent)
     catalog, profiles = load_resources(repository_root)
     host = detect_host()
-    platform_name = args.platform or detect_package_platform(host)
-    package_manager = PackageManager(args.package_manager) if args.package_manager else None
+    platform_name = getattr(args, "platform", None) or detect_package_platform(host)
+    requested_manager = getattr(args, "package_manager", None)
+    package_manager = PackageManager(requested_manager) if requested_manager else None
     if package_manager is None and platform_name in {"linux", "mattos"} and host.system == "linux":
         package_manager = detect_package_manager()
 

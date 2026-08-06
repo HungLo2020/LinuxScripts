@@ -1,11 +1,12 @@
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from packages.catalog import load_catalog, load_profiles
+from packages.catalog import load_catalog, load_package, load_profile, load_profiles
 from packages.models import PackageDefinition, PackageTarget, ProfileDefinition, ProfilePackage, ScriptDependencies, ScriptOperation
 from packages.planner import PackageResolutionError, resolve_profiles
 from packages.providers import plan_execution_steps, plan_provider_operations, preferred_provider
@@ -25,7 +26,7 @@ class PackagePlanningTests(unittest.TestCase):
         self.assertEqual(
             [package.name for package in plan.packages],
             [
-                "git", "curl", "ripgrep", "qdirstat", "baobab", "kate", "konsole", "fastfetch", "dolphin",
+                "git", "curl", "ripgrep", "fastfetch", "qdirstat", "baobab", "kate", "konsole", "dolphin",
                 "flatpak", "mission-center", "snapd", "bitwarden", "bw", "discord", "variety", "papirus-icon-theme",
                 "github-cli", "npm", "codex-cli", "vscode", "kmines", "steam", "libreoffice", "pipx", "konsave",
             ],
@@ -105,7 +106,7 @@ class PackagePlanningTests(unittest.TestCase):
     def test_dnf_does_not_fall_back_to_apt_target(self):
         with self.assertRaisesRegex(
             PackageResolutionError,
-            "Package 'qdirstat' is not available for the dnf package manager on linux.",
+            "Package 'fastfetch' is not available for the dnf package manager on linux.",
         ):
             resolve_profiles(
                 ["complete-desktop"],
@@ -130,6 +131,24 @@ class PackagePlanningTests(unittest.TestCase):
         codex_step = next(index for index, step in enumerate(steps) if getattr(step, "packages", ()) == ("codex-cli",))
         self.assertIsInstance(steps[codex_step - 1], ScriptOperation)
         self.assertEqual(steps[codex_step - 1].description, "Run pre-install script for 'codex-cli': hello_world.py")
+
+    def test_catalog_rejects_unknown_resource_fields(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            package_path = root / "invalid-package.toml"
+            package_path.write_text(
+                "[package]\nname = 'invalid'\nunexpected = true\n\n[targets.linux.apt]\nid = 'invalid'\n",
+                encoding="utf-8",
+            )
+            profile_path = root / "invalid-profile.toml"
+            profile_path.write_text(
+                "[profile]\nname = 'invalid'\nrequired_packages = []\noptional_packages = []\n\n[platforms.linix]\nrequired_packages = []\noptional_packages = []\n",
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(ValueError, "unsupported fields: unexpected"):
+                load_package(package_path)
+            with self.assertRaisesRegex(ValueError, "unsupported platform 'linix'"):
+                load_profile(profile_path)
 
     def test_unknown_profile_is_rejected(self):
         with self.assertRaises(PackageResolutionError):

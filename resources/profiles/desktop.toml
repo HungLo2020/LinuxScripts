@@ -1,7 +1,7 @@
 [profile]
 name = "desktop"
 description = "General desktop applications and authentication tools"
-includes = ["base", "utilities", "auth"]
+includes = ["base", "utilities", "gui-utilities", "auth"]
 required_packages = ["discord"]
 optional_packages = []
 

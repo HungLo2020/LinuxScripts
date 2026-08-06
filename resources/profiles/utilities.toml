@@ -1,10 +1,10 @@
 [profile]
 name = "utilities"
-description = "Shared system utilities"
+description = "Shared command-line system utilities"
 includes = []
 required_packages = []
 optional_packages = []
 
 [platforms.linux]
-required_packages = ["qdirstat", "baobab", "kate", "konsole", "fastfetch", "dolphin", "mission-center"]
+required_packages = ["fastfetch"]
 optional_packages = []

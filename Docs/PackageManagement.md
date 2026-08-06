@@ -13,6 +13,16 @@ python3 Tools/manage_packages.py apply complete-desktop --yes
 
 `plan` never changes the host. `apply` prints the same plan and requires `--yes` before it executes provider commands.
 
+`--platform` and `--package-manager` are available only on `plan` for safe cross-platform previews. `apply` always detects the local host so it cannot execute another platform's provider commands.
+
+## Bootstrap
+
+- Linux: `./Bootstrap.sh`
+- macOS: `./MacBootstrap.sh`
+- Windows PowerShell: `.\Bootstrap.ps1`
+
+Each bootstrap script creates the project-local `.venv` and installs `requirements.txt`. `MacBootstrap.sh` asks you to install Homebrew from https://brew.sh when it is unavailable. `Bootstrap.ps1` uses Winget to install Python 3.12 when necessary, or tells you how to install Python manually if Winget is unavailable.
+
 ## Resources
 
 - `resources/profiles/*.toml` defines named profiles.
@@ -49,6 +59,8 @@ id = "Discord.Discord"
 ```
 
 Each profile and platform table has `required_packages` and `optional_packages` arrays. A package cannot appear in both arrays within the same table. The resolver expands profile includes, adds common packages and packages from the matching `[platforms.<os>]` table, selects a target for the requested platform, resolves package dependencies before dependents, removes duplicates, and rejects profile or package cycles. Platform-specific profile packages are not requested on other operating systems. Required packages with no compatible target fail the plan. Optional packages are listed as skipped; the resolver never substitutes an incompatible native Linux package manager.
+
+Catalog and profile resources are strict: unknown top-level tables, fields, platforms, providers, and provider options fail during loading. This prevents a misspelled TOML field from silently changing an installation plan.
 
 Profiles can run repository Python dependency scripts before their packages are installed:
 

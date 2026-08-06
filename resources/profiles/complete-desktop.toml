@@ -1,7 +1,7 @@
 [profile]
 name = "complete-desktop"
 description = "Desktop, coding, gaming, and office capabilities"
-includes = ["desktop", "coding", "gaming", "office", "utilities", "auth"]
+includes = ["desktop", "coding", "gaming", "office", "utilities", "gui-utilities", "auth"]
 required_packages = []
 optional_packages = []
 
