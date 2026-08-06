@@ -218,6 +218,8 @@ class PackagePlanningTests(unittest.TestCase):
 
     def test_variety_hook_copies_the_repository_template(self):
         configure_variety = load_setup_script("configure_variety.py")
+        self.assertTrue(configure_variety.SOURCE_CONFIGURATION.is_file())
+        self.assertIn("/mnt/storage/OneDrive/Media/Wallpapers/Wide", configure_variety.SOURCE_CONFIGURATION.read_text(encoding="utf-8"))
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             source = root / "variety.conf"

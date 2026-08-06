@@ -154,6 +154,8 @@ def main() -> int:
             print(f"Preflight failed: {error}", file=sys.stderr)
             return 1
     succeeded = run_package_flow()
+    if not succeeded:
+        return 1
     try:
         offer_storage_mount(platform_name, package_manager)
         offer_server_manager(platform_name)
