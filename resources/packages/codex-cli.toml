@@ -1,0 +1,20 @@
+[package]
+name = "codex-cli"
+description = "OpenAI Codex command-line interface"
+depends_on = ["npm"]
+
+[script_dependencies]
+before = ["hello_world.py"]
+after = []
+
+[targets.linux.npm]
+id = "@openai/codex"
+
+[targets.mattos.npm]
+id = "@openai/codex"
+
+[targets.windows.npm]
+id = "@openai/codex"
+
+[targets.macos.npm]
+id = "@openai/codex"
