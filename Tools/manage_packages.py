@@ -14,9 +14,10 @@ if str(SOURCE_DIRECTORY) not in sys.path:
 
 from host import detect_host
 from packages.catalog import load_catalog, load_profiles
-from packages.executor import execute_operations
+from packages.executor import execute_operations, validate_script_dependencies
 from packages.planner import PackageResolutionError, resolve_profiles
-from packages.providers import ProviderPlanningError, plan_provider_operations, preferred_provider
+from packages.models import ScriptOperation
+from packages.providers import ProviderPlanningError, plan_execution_steps, preferred_provider
 from paths import find_repository_root
 from system import PackageManager, detect_package_manager, detect_package_platform
 
@@ -61,7 +62,8 @@ def resolve_command_plan(args: argparse.Namespace):
 
     provider_preferences = (preferred_provider(package_manager),) if package_manager else ()
     package_plan = resolve_profiles(args.profiles, catalog, profiles, platform_name, provider_preferences)
-    operations = plan_provider_operations(package_plan.packages, package_manager)
+    operations = plan_execution_steps(package_plan.packages, package_plan.profile_scripts, package_manager)
+    validate_script_dependencies(operations, repository_root)
     return host, platform_name, package_manager, package_plan, operations
 
 
@@ -81,6 +83,10 @@ def print_plan(host, platform_name, package_manager, package_plan, operations) -
             print(f"  {name}: {reason}")
     print("Provider operations:")
     for operation in operations:
+        if isinstance(operation, ScriptOperation):
+            print(f"  script: {operation.script}")
+            print(f"    {operation.description}")
+            continue
         print(f"  {operation.provider}: {', '.join(operation.packages)}")
         for command in operation.commands:
             privilege = "sudo " if command.elevated else ""
@@ -109,7 +115,7 @@ def main() -> int:
         print("Error: apply requires --yes after reviewing the plan.", file=sys.stderr)
         return 2
 
-    execute_operations(operations)
+    execute_operations(operations, repository_root)
     return 0
 
 

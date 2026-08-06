@@ -50,6 +50,23 @@ id = "Discord.Discord"
 
 Each profile and platform table has `required_packages` and `optional_packages` arrays. A package cannot appear in both arrays within the same table. The resolver expands profile includes, adds common packages and packages from the matching `[platforms.<os>]` table, selects a target for the requested platform, resolves package dependencies before dependents, removes duplicates, and rejects profile or package cycles. Platform-specific profile packages are not requested on other operating systems. Required packages with no compatible target fail the plan. Optional packages are listed as skipped; the resolver never substitutes an incompatible native Linux package manager.
 
+Profiles can run repository Python dependency scripts before their packages are installed:
+
+```toml
+[profile]
+script_dependencies = ["hello_world.py"]
+```
+
+Packages can run dependency scripts immediately before or after that individual package's provider operation:
+
+```toml
+[script_dependencies]
+before = ["hello_world.py"]
+after = []
+```
+
+Script paths are relative to `src/scripts/`. They are shown by `plan`, then run only during `apply --yes` with the project Python interpreter. Package installs without hooks remain batched; a package with hooks gets its own provider operation so its declared order is preserved.
+
 `utilities` is a shared profile included by both `desktop` and `server`. Its current package list is Linux-only, so it contributes no packages to Windows, macOS, or MattOS. `auth` is also included by `desktop` and `server`, and installs Bitwarden plus the `bw` command-line client on every supported platform.
 
 ## MattOS

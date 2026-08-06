@@ -63,9 +63,10 @@ def _expand_profiles(
     requested_profiles: Sequence[str],
     profiles: Mapping[str, ProfileDefinition],
     platform_name: str,
-) -> tuple[tuple[str, ...], tuple[tuple[str, bool], ...]]:
+) -> tuple[tuple[str, ...], tuple[tuple[str, bool], ...], tuple[str, ...]]:
     expanded: list[str] = []
     requested_packages: dict[str, bool] = {}
+    profile_scripts: dict[str, None] = {}
     visiting: set[str] = set()
     visited: set[str] = set()
 
@@ -84,13 +85,15 @@ def _expand_profiles(
         visiting.remove(name)
         visited.add(name)
         expanded.append(name)
+        for script in profile.script_dependencies:
+            profile_scripts[script] = None
         platform_packages = profile.platform_packages.get(platform_name, ())
         for package in (*profile.packages, *platform_packages):
             requested_packages[package.name] = requested_packages.get(package.name, False) or package.required
 
     for profile_name in requested_profiles:
         visit(profile_name)
-    return tuple(expanded), tuple(requested_packages.items())
+    return tuple(expanded), tuple(requested_packages.items()), tuple(profile_scripts)
 
 
 def resolve_profiles(
@@ -102,7 +105,7 @@ def resolve_profiles(
 ) -> PackagePlan:
     """Resolve profile and package dependencies in install order for one platform."""
 
-    expanded_profiles, requested_packages = _expand_profiles(requested_profiles, profiles, platform_name)
+    expanded_profiles, requested_packages, profile_scripts = _expand_profiles(requested_profiles, profiles, platform_name)
     resolved: list[ResolvedPackage] = []
     skipped: dict[str, str] = {}
     visiting: set[str] = set()
@@ -141,10 +144,10 @@ def resolve_profiles(
 
         states[name] = dependencies_ready
         if dependencies_ready:
-            resolved.append(ResolvedPackage(name, target))
+            resolved.append(ResolvedPackage(name, target, package.script_dependencies))
         return dependencies_ready
 
     for package_name, required in requested_packages:
         visit(package_name, required)
 
-    return PackagePlan(expanded_profiles, tuple(resolved), skipped)
+    return PackagePlan(expanded_profiles, tuple(resolved), skipped, profile_scripts)

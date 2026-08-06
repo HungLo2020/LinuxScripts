@@ -18,12 +18,21 @@ class PackageTarget:
 
 
 @dataclass(frozen=True)
+class ScriptDependencies:
+    """Python scripts that run around a package installation."""
+
+    before: tuple[str, ...]
+    after: tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class PackageDefinition:
     """A logical package with dependencies and platform-specific targets."""
 
     name: str
     description: str
     dependencies: tuple[str, ...]
+    script_dependencies: ScriptDependencies
     targets: tuple[PackageTarget, ...]
 
 
@@ -44,6 +53,7 @@ class ProfileDefinition:
     includes: tuple[str, ...]
     packages: tuple[ProfilePackage, ...]
     platform_packages: Mapping[str, tuple[ProfilePackage, ...]]
+    script_dependencies: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -52,6 +62,7 @@ class ResolvedPackage:
 
     name: str
     target: PackageTarget
+    script_dependencies: ScriptDependencies
 
 
 @dataclass(frozen=True)
@@ -61,6 +72,7 @@ class PackagePlan:
     profiles: tuple[str, ...]
     packages: tuple[ResolvedPackage, ...]
     skipped: Mapping[str, str]
+    profile_scripts: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -79,3 +91,11 @@ class ProviderOperation:
     provider: str
     packages: tuple[str, ...]
     commands: tuple[CommandSpec, ...]
+
+
+@dataclass(frozen=True)
+class ScriptOperation:
+    """One repository Python script scheduled as part of an apply plan."""
+
+    script: str
+    description: str

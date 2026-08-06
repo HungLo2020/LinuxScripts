@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from packages.models import PackageDefinition, PackageTarget, ProfileDefinition, ProfilePackage
+from packages.models import PackageDefinition, PackageTarget, ProfileDefinition, ProfilePackage, ScriptDependencies
 from toml_reader import load_toml
 
 
@@ -13,6 +13,24 @@ def _string_list(value: Any, label: str) -> tuple[str, ...]:
     if not isinstance(value, list) or not all(isinstance(item, str) and item for item in value):
         raise ValueError(f"{label} must be a list of non-empty strings.")
     return tuple(value)
+
+
+def _script_list(value: Any, label: str) -> tuple[str, ...]:
+    scripts = _string_list(value, label)
+    for script in scripts:
+        path = Path(script)
+        if path.is_absolute() or ".." in path.parts or path.suffix != ".py":
+            raise ValueError(f"{label} must contain Python paths relative to src/scripts.")
+    return scripts
+
+
+def _package_script_dependencies(value: Any, label: str) -> ScriptDependencies:
+    if not isinstance(value, dict):
+        raise ValueError(f"{label} must be a table.")
+    return ScriptDependencies(
+        _script_list(value.get("before", []), f"{label} before"),
+        _script_list(value.get("after", []), f"{label} after"),
+    )
 
 
 def load_package(path: Path) -> PackageDefinition:
@@ -29,6 +47,10 @@ def load_package(path: Path) -> PackageDefinition:
     if not isinstance(description, str):
         raise ValueError(f"Package '{name}' description must be a string.")
     package_dependencies = _string_list(entry.get("depends_on", []), f"Package '{name}' depends_on")
+    script_dependencies = _package_script_dependencies(
+        document.get("script_dependencies", {}),
+        f"Package '{name}' script_dependencies",
+    )
     target_entries = document.get("targets", {})
     if not isinstance(target_entries, dict):
         raise ValueError(f"Package '{name}' targets must be a table.")
@@ -53,7 +75,7 @@ def load_package(path: Path) -> PackageDefinition:
 
     if not targets:
         raise ValueError(f"Package '{name}' must define at least one target.")
-    return PackageDefinition(name, description, package_dependencies, tuple(targets))
+    return PackageDefinition(name, description, package_dependencies, script_dependencies, tuple(targets))
 
 
 def load_catalog(directory: Path) -> dict[str, PackageDefinition]:
@@ -115,6 +137,7 @@ def load_profile(path: Path) -> ProfileDefinition:
         _string_list(profile.get("includes", []), f"Profile '{name}' includes"),
         _profile_packages(profile, f"Profile '{name}'"),
         _platform_profile_packages(document.get("platforms", {}), name),
+        _script_list(profile.get("script_dependencies", []), f"Profile '{name}' script_dependencies"),
     )
 
 

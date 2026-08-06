@@ -6,9 +6,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from packages.catalog import load_catalog, load_profiles
-from packages.models import PackageDefinition, PackageTarget, ProfileDefinition, ProfilePackage
+from packages.models import PackageDefinition, PackageTarget, ProfileDefinition, ProfilePackage, ScriptDependencies, ScriptOperation
 from packages.planner import PackageResolutionError, resolve_profiles
-from packages.providers import plan_provider_operations, preferred_provider
+from packages.providers import plan_execution_steps, plan_provider_operations, preferred_provider
 from host import HostPlatform
 from system import LinuxDistro, PackageManager, detect_package_platform
 
@@ -27,7 +27,7 @@ class PackagePlanningTests(unittest.TestCase):
             [
                 "git", "curl", "ripgrep", "qdirstat", "baobab", "kate", "konsole", "fastfetch", "dolphin",
                 "flatpak", "mission-center", "snapd", "bitwarden", "bw", "discord", "variety", "papirus-icon-theme",
-                "github-cli", "vscode", "kmines", "steam", "libreoffice", "pipx", "konsave",
+                "github-cli", "npm", "codex-cli", "vscode", "kmines", "steam", "libreoffice", "pipx", "konsave",
             ],
         )
 
@@ -35,7 +35,7 @@ class PackagePlanningTests(unittest.TestCase):
         plan = resolve_profiles(["complete-desktop"], self.catalog, self.profiles, "mattos", ("apt",))
         self.assertEqual(
             [package.name for package in plan.packages],
-            ["git", "curl", "ripgrep", "snapd", "bitwarden", "bw", "flatpak", "discord", "github-cli", "basalt"],
+            ["git", "curl", "ripgrep", "snapd", "bitwarden", "bw", "flatpak", "discord", "github-cli", "npm", "codex-cli", "basalt"],
         )
         platforms_by_package = {package.name: package.target.platform for package in plan.packages}
         self.assertEqual(platforms_by_package["basalt"], "mattos")
@@ -57,6 +57,7 @@ class PackagePlanningTests(unittest.TestCase):
                 "mattos-tool",
                 "Test MattOS package",
                 (),
+                ScriptDependencies((), ()),
                 (
                     PackageTarget("linux", "apt", "linux-tool", (), {}),
                 ),
@@ -71,6 +72,7 @@ class PackagePlanningTests(unittest.TestCase):
                 {
                     "mattos": (ProfilePackage("mattos-tool", True),),
                 },
+                (),
             )
         }
         with self.assertRaisesRegex(PackageResolutionError, "No package target is defined for mattos."):
@@ -85,7 +87,10 @@ class PackagePlanningTests(unittest.TestCase):
 
     def test_windows_excludes_linux_only_profile_packages(self):
         plan = resolve_profiles(["complete-desktop"], self.catalog, self.profiles, "windows")
-        self.assertEqual([package.name for package in plan.packages], ["git", "curl", "ripgrep", "bitwarden", "bw", "discord", "github-cli"])
+        self.assertEqual(
+            [package.name for package in plan.packages],
+            ["git", "curl", "ripgrep", "bitwarden", "bw", "discord", "github-cli", "npm", "codex-cli"],
+        )
         self.assertEqual(plan.skipped, {})
         self.assertNotIn("flatpak", [package.name for package in plan.packages])
         self.assertNotIn("konsave", [package.name for package in plan.packages])
@@ -115,6 +120,16 @@ class PackagePlanningTests(unittest.TestCase):
         operations = plan_provider_operations(plan.packages, PackageManager.APT)
         self.assertEqual(operations[0].commands[1].argv[:3], ("apt-get", "install", "-y"))
         self.assertIn("pipx", operations[0].commands[1].argv)
+
+    def test_coding_scripts_run_before_profile_and_codex_install(self):
+        plan = resolve_profiles(["coding"], self.catalog, self.profiles, "linux", ("apt",))
+        steps = plan_execution_steps(plan.packages, plan.profile_scripts, PackageManager.APT)
+        self.assertEqual(plan.profile_scripts, ("hello_world.py",))
+        self.assertIsInstance(steps[0], ScriptOperation)
+        self.assertEqual(steps[0].description, "Run profile dependency script 'hello_world.py'")
+        codex_step = next(index for index, step in enumerate(steps) if getattr(step, "packages", ()) == ("codex-cli",))
+        self.assertIsInstance(steps[codex_step - 1], ScriptOperation)
+        self.assertEqual(steps[codex_step - 1].description, "Run pre-install script for 'codex-cli': hello_world.py")
 
     def test_unknown_profile_is_rejected(self):
         with self.assertRaises(PackageResolutionError):

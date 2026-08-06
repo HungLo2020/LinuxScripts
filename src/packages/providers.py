@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections import OrderedDict
 from collections.abc import Iterable
 
-from packages.models import CommandSpec, PackageTarget, ProviderOperation, ResolvedPackage
+from packages.models import CommandSpec, PackageTarget, ProviderOperation, ResolvedPackage, ScriptOperation
 from system import PackageManager
 
 
@@ -116,6 +116,17 @@ def _pipx_operation(packages: list[ResolvedPackage]) -> ProviderOperation:
     return ProviderOperation("pipx", tuple(package.name for package in packages), commands)
 
 
+def _npm_operation(packages: list[ResolvedPackage]) -> ProviderOperation:
+    commands = tuple(
+        CommandSpec(
+            ("npm", "install", "--global", package.target.identifier),
+            f"Install npm package '{package.name}'",
+        )
+        for package in packages
+    )
+    return ProviderOperation("npm", tuple(package.name for package in packages), commands)
+
+
 def _snap_operation(packages: list[ResolvedPackage]) -> ProviderOperation:
     commands = tuple(
         CommandSpec(
@@ -174,6 +185,8 @@ def plan_provider_operations(
             operations.append(_flatpak_operation(grouped_packages))
         elif provider == "pipx":
             operations.append(_pipx_operation(grouped_packages))
+        elif provider == "npm":
+            operations.append(_npm_operation(grouped_packages))
         elif provider == "snap":
             operations.append(_snap_operation(grouped_packages))
         elif provider == "winget":
@@ -183,3 +196,40 @@ def plan_provider_operations(
         else:
             raise ProviderPlanningError(f"Unsupported package provider: '{provider}'.")
     return tuple(operations)
+
+
+def plan_execution_steps(
+    packages: Iterable[ResolvedPackage],
+    profile_scripts: Iterable[str],
+    package_manager: PackageManager | None,
+) -> tuple[ProviderOperation | ScriptOperation, ...]:
+    """Build execution steps while honoring profile and package script boundaries."""
+
+    steps: list[ProviderOperation | ScriptOperation] = [
+        ScriptOperation(script, f"Run profile dependency script '{script}'") for script in profile_scripts
+    ]
+    pending: list[ResolvedPackage] = []
+
+    def flush_pending() -> None:
+        nonlocal pending
+        if pending:
+            steps.extend(plan_provider_operations(pending, package_manager))
+            pending = []
+
+    for package in packages:
+        definition_scripts = package.script_dependencies
+        if not definition_scripts.before and not definition_scripts.after:
+            pending.append(package)
+            continue
+        flush_pending()
+        steps.extend(
+            ScriptOperation(script, f"Run pre-install script for '{package.name}': {script}")
+            for script in definition_scripts.before
+        )
+        steps.extend(plan_provider_operations((package,), package_manager))
+        steps.extend(
+            ScriptOperation(script, f"Run post-install script for '{package.name}': {script}")
+            for script in definition_scripts.after
+        )
+    flush_pending()
+    return tuple(steps)
