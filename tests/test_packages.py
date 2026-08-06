@@ -1,7 +1,9 @@
 import sys
 import tempfile
 import unittest
+import importlib.util
 from pathlib import Path
+from unittest.mock import patch
 
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
@@ -13,6 +15,17 @@ from packages.planner import PackageResolutionError, resolve_profiles
 from packages.providers import plan_execution_steps, plan_provider_operations, preferred_provider
 from host import HostPlatform
 from system import LinuxDistro, PackageManager, detect_package_platform
+
+
+def load_tailscale_configure_script():
+    """Load the source-owned Tailscale hook without executing its main block."""
+
+    path = Path(__file__).resolve().parents[1] / "src" / "scripts" / "configure_tailscale.py"
+    specification = importlib.util.spec_from_file_location("configure_tailscale", path)
+    module = importlib.util.module_from_spec(specification)
+    assert specification.loader is not None
+    specification.loader.exec_module(module)
+    return module
 
 
 class PackagePlanningTests(unittest.TestCase):
@@ -155,6 +168,19 @@ class PackagePlanningTests(unittest.TestCase):
         self.assertEqual(steps[rustdesk_step - 1].script, "download_rustdesk.py")
         self.assertEqual(steps[rustdesk_step + 1].script, "configure_rustdesk.py")
         self.assertEqual(steps[rustdesk_step].provider, "apt_deb")
+
+    def test_tailscale_hook_skips_interactive_enrollment_when_connected(self):
+        configure_tailscale = load_tailscale_configure_script()
+        connected_status = {"BackendState": "Running", "Self": {"Online": True}}
+        self.assertTrue(configure_tailscale.is_connected(connected_status))
+        self.assertFalse(configure_tailscale.is_connected({"BackendState": "Running", "Self": {"Online": False}}))
+        with patch.object(configure_tailscale, "tailscale_status", return_value=connected_status), patch.object(
+            configure_tailscale.subprocess,
+            "run",
+        ) as run_command, patch.object(configure_tailscale, "confirm_enrollment") as confirm_enrollment:
+            self.assertEqual(configure_tailscale.main(), 0)
+        self.assertEqual(run_command.call_count, 1)
+        confirm_enrollment.assert_not_called()
 
     def test_linux_profile_removals_run_after_installations(self):
         plan = resolve_profiles(["gaming"], self.catalog, self.profiles, "linux", ("apt",))
