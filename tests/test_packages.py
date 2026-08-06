@@ -13,6 +13,7 @@ from packages.cli import build_command_plan
 from packages.models import PackageDefinition, PackageTarget, ProfileDefinition, ProfilePackage, ScriptDependencies, ScriptOperation
 from packages.planner import PackageResolutionError, resolve_profiles
 from packages.providers import plan_execution_steps, plan_provider_operations, preferred_provider
+from server.btrfs_snapshots import BtrfsSnapshotManager
 from storage_smb import LEGACY_HELPER_PATH, MountConfiguration, retire_legacy_implementation, service_contents, sudo
 from host import HostPlatform
 from system import LinuxDistro, PackageManager, detect_package_platform
@@ -204,6 +205,18 @@ class PackagePlanningTests(unittest.TestCase):
         with patch("storage_smb.subprocess.run") as run_command:
             sudo(("systemctl", "disable", "--now", "storage-smb-mount.service"), check=False)
         self.assertFalse(run_command.call_args.kwargs["check"])
+
+    def test_btrfs_snapshot_manager_parses_legacy_subvolume_output(self):
+        output = "ID 257 gen 10 parent 5 top level 5 path snapshots/@data-2026-08-06-1200\n"
+        self.assertEqual(
+            BtrfsSnapshotManager.parse_subvolumes(output),
+            [("257", "5", "snapshots/@data-2026-08-06-1200")],
+        )
+        manager = BtrfsSnapshotManager.with_defaults()
+        with patch.object(BtrfsSnapshotManager, "run") as run_command:
+            run_command.return_value.stdout = output
+            run_command.return_value.returncode = 0
+            self.assertEqual(manager.snapshot_entries(), ["snapshots/@data-2026-08-06-1200"])
 
     def test_linux_profile_removals_run_after_installations(self):
         plan = resolve_profiles(["gaming"], self.catalog, self.profiles, "linux", ("apt",))

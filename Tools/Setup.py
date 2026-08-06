@@ -98,6 +98,14 @@ def offer_storage_mount(platform_name: str, package_manager: PackageManager | No
     configure_interactively()
 
 
+def offer_server_manager(platform_name: str) -> None:
+    """Offer server administration as an independent optional Setup capability."""
+
+    if platform_name != "linux" or not prompt_yes_no("Open the Server Manager?"):
+        return
+    subprocess.run((sys.executable, str(REPOSITORY_ROOT / "Tools" / "ServerManager.py")), check=True)
+
+
 def run_package_flow() -> bool:
     """Offer one package profile without ending later interactive setup steps."""
 
@@ -141,6 +149,7 @@ def main() -> int:
     succeeded = run_package_flow()
     try:
         offer_storage_mount(platform_name, package_manager)
+        offer_server_manager(platform_name)
     except (OSError, RuntimeError, subprocess.CalledProcessError) as error:
         print(f"Storage mount setup failed: {error}", file=sys.stderr)
         succeeded = False

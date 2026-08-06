@@ -12,6 +12,14 @@ python3 Tools/Setup.py
 
 After a successful interactive apply on Linux with APT, it also offers persistent Tailscale SMB storage-mount setup. The service retries indefinitely when Tailscale or the server share is unavailable; see [../Docs/PackageManagement.md](../Docs/PackageManagement.md) for its defaults and credential behavior.
 
+On Linux, the next optional Setup step opens `ServerManager.py`. It can also be run directly for server-only administration:
+
+```bash
+python3 Tools/ServerManager.py
+```
+
+The initial capability is Btrfs snapshot management for `/srv/storage`.
+
 It also forwards non-interactive commands to the implementation in `src/packages/cli.py`:
 
 ```bash
