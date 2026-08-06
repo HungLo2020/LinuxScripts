@@ -28,6 +28,7 @@ if str(SOURCE_DIRECTORY) not in sys.path:
 
 from host import detect_host
 from server.btrfs_snapshots import main as btrfs_main
+from server.restic_backups import main as restic_main
 
 
 def ensure_elevated() -> None:
@@ -59,12 +60,19 @@ def container_manager_action() -> int:
     return subprocess.run((sys.executable, str(REPOSITORY_ROOT / "Tools" / "ContainerManager.py")), check=False).returncode
 
 
+def restic_backup_action() -> int:
+    """Run the legacy-compatible user-owned Restic backup manager."""
+
+    return restic_main([])
+
+
 def capabilities() -> tuple[tuple[str, str, Callable[[], int]], ...]:
     """Return modular server capabilities for the interactive menu."""
 
     return (
         ("Btrfs snapshot manager", "Manage snapshots under /srv/storage/snapshots", btrfs_snapshot_action),
         ("Container manager", "Queue Docker workload install, start, stop, or deletion actions", container_manager_action),
+        ("Restic backup manager", "Configure, run, restore, and schedule local Restic backup jobs", restic_backup_action),
     )
 
 
