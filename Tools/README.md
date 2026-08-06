@@ -18,7 +18,7 @@ On Linux, the next optional Setup step opens `ServerManager.py`. It can also be 
 python3 Tools/ServerManager.py
 ```
 
-Server capabilities include Btrfs snapshot management for `/srv/storage` and the legacy-compatible Restic backup manager. Restic configurations, generated helpers, and password files remain under `~/.config/restic-mattmc/`; its systemd timers run as the user who configures them.
+Server capabilities include Btrfs snapshot management for `/srv/storage`, plus legacy-compatible Restic and ZIP backup managers. Restic configurations, generated helpers, and password files remain under `~/.config/restic-mattmc/`; ZIP configurations and helpers remain under `~/.config/zip-backup-manager/`. Their systemd timers run as the user who configures them.
 
 `ContainerManager.py` is also available directly and preserves the legacy queue-then-run lifecycle flow:
 

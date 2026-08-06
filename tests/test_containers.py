@@ -61,6 +61,7 @@ class ContainerMigrationTests(unittest.TestCase):
         self.assertIn("Container manager", names)
         self.assertIn("Btrfs snapshot manager", names)
         self.assertIn("Restic backup manager", names)
+        self.assertIn("ZIP backup manager", names)
 
 
 if __name__ == "__main__":

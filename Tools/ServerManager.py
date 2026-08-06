@@ -29,6 +29,7 @@ if str(SOURCE_DIRECTORY) not in sys.path:
 from host import detect_host
 from server.btrfs_snapshots import main as btrfs_main
 from server.restic_backups import main as restic_main
+from server.zip_backups import main as zip_backup_main
 
 
 def ensure_elevated() -> None:
@@ -66,6 +67,12 @@ def restic_backup_action() -> int:
     return restic_main([])
 
 
+def zip_backup_action() -> int:
+    """Run the legacy-compatible user-owned ZIP backup manager."""
+
+    return zip_backup_main([])
+
+
 def capabilities() -> tuple[tuple[str, str, Callable[[], int]], ...]:
     """Return modular server capabilities for the interactive menu."""
 
@@ -73,6 +80,7 @@ def capabilities() -> tuple[tuple[str, str, Callable[[], int]], ...]:
         ("Btrfs snapshot manager", "Manage snapshots under /srv/storage/snapshots", btrfs_snapshot_action),
         ("Container manager", "Queue Docker workload install, start, stop, or deletion actions", container_manager_action),
         ("Restic backup manager", "Configure, run, restore, and schedule local Restic backup jobs", restic_backup_action),
+        ("ZIP backup manager", "Configure, archive, retain, and schedule local ZIP backup jobs", zip_backup_action),
     )
 
 
