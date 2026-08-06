@@ -1,0 +1,10 @@
+[profile]
+name = "coding"
+description = "Development command-line tools"
+includes = ["desktop", "auth"]
+required_packages = ["github-cli"]
+optional_packages = []
+
+[platforms.linux]
+required_packages = ["vscode"]
+optional_packages = []

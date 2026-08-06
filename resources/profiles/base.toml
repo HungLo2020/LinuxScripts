@@ -1,0 +1,6 @@
+[profile]
+name = "base"
+description = "Cross-platform command-line essentials"
+includes = []
+required_packages = ["git", "curl", "ripgrep"]
+optional_packages = []

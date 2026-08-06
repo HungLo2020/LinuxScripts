@@ -1,0 +1,10 @@
+[package]
+name = "konsave"
+description = "KDE configuration profile manager"
+depends_on = ["pipx"]
+
+[targets.linux.pipx]
+id = "konsave"
+
+[targets.macos.pipx]
+id = "konsave"

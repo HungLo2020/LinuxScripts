@@ -9,7 +9,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Callable, Mapping
 
-from host import detect_host
+from host import HostPlatform, detect_host
 from process import find_command
 
 
@@ -47,6 +47,7 @@ _DISTRO_PACKAGE_MANAGERS: dict[str, PackageManager] = {
     "debian": PackageManager.APT,
     "fedora": PackageManager.DNF,
     "manjaro": PackageManager.PACMAN,
+    "mattos": PackageManager.APT,
     "opensuse": PackageManager.ZYPPER,
     "rhel": PackageManager.DNF,
     "suse": PackageManager.ZYPPER,
@@ -109,6 +110,19 @@ def detect_linux_distro(os_release_path: Path = Path("/etc/os-release")) -> Linu
     name = values.get("PRETTY_NAME") or values.get("NAME") or identifier
     like = tuple(value.lower() for value in values.get("ID_LIKE", "").split() if value)
     return LinuxDistro(identifier, name, values.get("VERSION_ID") or None, like)
+
+
+def detect_package_platform(
+    host: HostPlatform | None = None,
+    distro: LinuxDistro | None = None,
+) -> str:
+    """Return the package-resource platform that applies to the current host."""
+
+    host = host if host is not None else detect_host()
+    if host.system != "linux":
+        return host.system
+    distro = distro if distro is not None else detect_linux_distro()
+    return "mattos" if distro is not None and distro.identifier == "mattos" else "linux"
 
 
 def detect_package_manager(

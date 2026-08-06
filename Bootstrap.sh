@@ -109,6 +109,18 @@ ensure_virtual_environment() {
   fi
 }
 
+install_project_requirements() {
+  local python_command="${VENV_DIR}/bin/python"
+  local requirements_file="${PROJECT_ROOT}/requirements.txt"
+
+  if [[ ! -f "${requirements_file}" ]]; then
+    return 0
+  fi
+
+  log "Installing project Python requirements..."
+  "${python_command}" -m pip install --requirement "${requirements_file}"
+}
+
 main() {
   local python_command
 
@@ -144,6 +156,7 @@ main() {
   fi
 
   ensure_virtual_environment "${python_command}"
+  install_project_requirements
 
   log "Python bootstrap complete."
   log "Interpreter: ${VENV_DIR}/bin/python"
