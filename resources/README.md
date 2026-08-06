@@ -30,3 +30,5 @@ Packages can declare Python `before` and `after` hooks for source setup, authent
 ## KDE Profiles
 
 `KDEProfiles/*.knsv` contains Konsave exports. Use `Tools/save_konsave_profile.py` to create or synchronize them.
+
+`homepage/` contains templates copied into `~/.homepage-dashboard/config/` on each Homepage workload run. `jellyfin/` contains the compose and environment templates copied into `~/.jellyfin-stack/` when creating the Jellyfin media stack.

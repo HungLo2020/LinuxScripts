@@ -20,6 +20,21 @@ python3 Tools/ServerManager.py
 
 The initial capability is Btrfs snapshot management for `/srv/storage`.
 
+`ContainerManager.py` is also available directly and preserves the legacy queue-then-run lifecycle flow:
+
+```bash
+python3 Tools/ContainerManager.py
+```
+
+For automation or one workload at a time, the direct source launchers accept the legacy no-argument install/update mode, `--on`, `--off`, and `-D` flags:
+
+```bash
+python3 src/containers/run_homepage.py --on
+python3 src/containers/run_jellyfin.py -D
+```
+
+The available workloads are Homepage, the Jellyfin media stack, Ollama plus Open WebUI, Portainer, and AUTOMATIC1111 Stable Diffusion. They retain their legacy container names, ports, image names, host data directories, prompts, and cleanup targets.
+
 It also forwards non-interactive commands to the implementation in `src/packages/cli.py`:
 
 ```bash

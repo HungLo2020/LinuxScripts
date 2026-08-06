@@ -27,7 +27,7 @@ if str(SOURCE_DIRECTORY) not in sys.path:
     sys.path.insert(0, str(SOURCE_DIRECTORY))
 
 from host import detect_host
-from server.btrfs_snapshots import BtrfsSnapshotManager
+from server.btrfs_snapshots import main as btrfs_main
 
 
 def ensure_elevated() -> None:
@@ -50,13 +50,22 @@ def prompt_yes_no(question: str) -> bool:
 def btrfs_snapshot_action() -> int:
     """Run the legacy-compatible Btrfs snapshot manager capability."""
 
-    return BtrfsSnapshotManager.with_defaults().menu()
+    return btrfs_main([])
+
+
+def container_manager_action() -> int:
+    """Run container administration as the invoking user, not as root."""
+
+    return subprocess.run((sys.executable, str(REPOSITORY_ROOT / "Tools" / "ContainerManager.py")), check=False).returncode
 
 
 def capabilities() -> tuple[tuple[str, str, Callable[[], int]], ...]:
     """Return modular server capabilities for the interactive menu."""
 
-    return (("Btrfs snapshot manager", "Manage snapshots under /srv/storage/snapshots", btrfs_snapshot_action),)
+    return (
+        ("Btrfs snapshot manager", "Manage snapshots under /srv/storage/snapshots", btrfs_snapshot_action),
+        ("Container manager", "Queue Docker workload install, start, stop, or deletion actions", container_manager_action),
+    )
 
 
 def main() -> int:
@@ -66,7 +75,6 @@ def main() -> int:
     if host.system != "linux":
         print("Server Manager currently supports Linux only.", file=sys.stderr)
         return 1
-    ensure_elevated()
     choices = capabilities()
     while True:
         print("LinuxScripts Server Manager")

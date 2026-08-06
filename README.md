@@ -52,7 +52,7 @@ python3 Tools/Setup.py apply desktop --yes
 
 ## Layout
 
-- [Tools/README.md](Tools/README.md): user-facing package and KDE profile tools.
+- [Tools/README.md](Tools/README.md): user-facing package, server, container, and KDE profile tools.
 - [GenericScripts/README.md](GenericScripts/README.md): reusable backup and MattOS repository utilities.
 - [DevUtils/README.md](DevUtils/README.md): repository-specific development utilities.
 - [resources/README.md](resources/README.md): declarative package, profile, and KDE profile resources.
