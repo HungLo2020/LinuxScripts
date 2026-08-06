@@ -17,6 +17,7 @@ from server.btrfs_snapshots import BtrfsSnapshotManager
 from storage_smb import LEGACY_HELPER_PATH, MountConfiguration, retire_legacy_implementation, service_contents, sudo
 from host import HostPlatform
 from system import LinuxDistro, PackageManager, detect_package_platform
+from konsave.apply import choose_profile
 
 
 def load_tailscale_configure_script():
@@ -189,6 +190,24 @@ class PackagePlanningTests(unittest.TestCase):
         variety_step = next(index for index, step in enumerate(steps) if getattr(step, "packages", ()) == ("variety",))
         self.assertEqual(steps[ssh_step + 1].script, "configure_openssh_server.py")
         self.assertEqual(steps[variety_step + 1].script, "configure_variety.py")
+
+    def test_konsave_uses_a_post_install_profile_workflow(self):
+        plan = resolve_profiles(["complete-desktop"], self.catalog, self.profiles, "linux", ("apt", "pipx"))
+        steps = plan_execution_steps(plan.packages, plan.profile_scripts, PackageManager.APT, plan.delete_packages)
+        konsave_step = next(index for index, step in enumerate(steps) if getattr(step, "packages", ()) == ("konsave",))
+        self.assertEqual(steps[konsave_step + 1].script, "configure_konsave.py")
+
+    def test_konsave_profile_menu_preserves_legacy_default_and_skip_choice(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            profiles = root / "resources" / "KDEProfiles"
+            profiles.mkdir(parents=True)
+            (profiles / "HungLoStandard.knsv").write_text("profile", encoding="utf-8")
+            (profiles / "Other.knsv").write_text("profile", encoding="utf-8")
+            with patch("builtins.input", return_value=""):
+                self.assertEqual(choose_profile(root), "HungLoStandard")
+            with patch("builtins.input", return_value="1"):
+                self.assertIsNone(choose_profile(root))
 
     def test_openssh_hook_enables_the_legacy_ssh_service(self):
         configure_openssh = load_setup_script("configure_openssh_server.py")

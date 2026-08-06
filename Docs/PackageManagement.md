@@ -89,6 +89,8 @@ Script paths are relative to `src/scripts/`. They are shown by `plan`, then run 
 
 On Linux, `base` also installs `openssh-server` and enables/starts the `ssh` service after installation. The Linux-only `variety` package installs the bundled `resources/variety.conf` into the invoking user's `~/.config/variety/variety.conf` after APT installs Variety.
 
+The Linux-only `konsave` package is installed by the declarative `pipx` provider. Its post-install Python workflow optionally downloads `.knsv` assets published in this repository's GitHub Releases, then presents the legacy-compatible profile menu: skip applying a profile, apply `HungLoStandard` by default when available, or choose another local profile. `Tools/save_konsave_profile.py` only saves/exports and optionally publishes profiles; it reuses the package-managed `konsave` executable and never invokes a legacy installer or force-reinstalls Konsave.
+
 ## MattOS
 
 MattOS is detected when its `/etc/os-release` declares `ID=mattos`. It is an APT-based platform, but it does not inherit generic Linux profile sections or package targets. Every MattOS-specific profile package and package target must be declared explicitly.

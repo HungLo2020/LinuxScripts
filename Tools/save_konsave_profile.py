@@ -18,7 +18,7 @@ from host import detect_host
 from konsave.command import resolve_konsave_command
 from konsave.releases import upload_profiles
 from paths import find_repository_root, profile_directory
-from process import require_command, run_command
+from process import run_command
 
 
 DEFAULT_PROFILE_NAME = "HungLoStandard"
@@ -101,22 +101,13 @@ def main() -> int:
     host = detect_host()
     print(f"Detected host: {host.system}/{host.architecture}")
 
-    # Konsave setup has not yet been migrated from the legacy helper.
-    setup_script = repository_root / "Deprecated" / "miniscripts" / "notautorun" / "KonsaveSetup.sh"
-    if not setup_script.is_file():
-        raise RuntimeError(f"Konsave setup helper script not found: {setup_script}")
-    require_command("bash")
-
-    print("Running Konsave setup first...")
-    run_command(["bash", str(setup_script)])
-
     profiles_dir = profile_directory(repository_root)
     profiles_dir.mkdir(parents=True, exist_ok=True)
     if not os.access(profiles_dir, os.W_OK):
         raise RuntimeError(f"KDE profiles directory is not writable: {profiles_dir}")
 
-    profile_name = choose_profile_name(args.name)
     konsave = resolve_konsave_command()
+    profile_name = choose_profile_name(args.name)
     save_profile(profile_name, profiles_dir, konsave)
 
     if args.upload or (not args.no_upload and ask_upload()):

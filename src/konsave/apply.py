@@ -21,6 +21,26 @@ def available_profiles(repository_root: Path) -> list[str]:
     return ([DEFAULT_PROFILE_NAME] if DEFAULT_PROFILE_NAME in profile_names else []) + other_profiles
 
 
+def choose_profile(repository_root: Path) -> str | None:
+    """Present the legacy profile-selection menu and return None to skip apply."""
+
+    profiles = available_profiles(repository_root)
+    default_selection = 2 if DEFAULT_PROFILE_NAME in profiles else 1
+    print("Available KDE profiles:")
+    print("  1. Do not apply any profile")
+    for index, name in enumerate(profiles, start=2):
+        print(f"  {index}. {name}")
+    while True:
+        try:
+            entered = input(f"Select profile number [{default_selection}]: ").strip()
+        except EOFError:
+            return None
+        selected = default_selection if not entered else int(entered) if entered.isdigit() else 0
+        if 1 <= selected <= len(profiles) + 1:
+            return None if selected == 1 else profiles[selected - 2]
+        print(f"Please enter a valid number between 1 and {len(profiles) + 1}.")
+
+
 def apply_profile(repository_root: Path, profile_name: str) -> bool:
     """Import a local profile when available, then apply it by name.
 

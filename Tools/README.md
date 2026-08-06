@@ -56,4 +56,4 @@ python3 Tools/save_konsave_profile.py --name MyProfile --no-upload
 python3 Tools/save_konsave_profile.py --name MyProfile --upload
 ```
 
-The save tool currently runs the Konsave setup helper still located under `Deprecated/`; that helper has not yet been migrated into the active tooling.
+On Linux, the declarative `konsave` package installs Konsave through `pipx`, then offers to download published `.knsv` profiles from GitHub Releases and select one to import/apply. The save tool uses that package-managed Konsave executable; it does not install or update Konsave itself.

@@ -1,4 +1,4 @@
-"""Resolve the Konsave command without modifying the project environment."""
+"""Resolve the Konsave command installed through the package system."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from process import find_command
 
 
 def resolve_konsave_command() -> list[str]:
-    """Return Konsave's command, preferring an installed executable over pipx."""
+    """Return the Konsave executable installed by the package system."""
 
     local_bin = Path.home() / ".local" / "bin"
     os.environ["PATH"] = f"{local_bin}{os.pathsep}{os.environ.get('PATH', '')}"
@@ -18,11 +18,4 @@ def resolve_konsave_command() -> list[str]:
     if executable is not None:
         return [executable]
 
-    pipx = find_command("pipx")
-    if pipx is not None:
-        return [pipx, "run", "konsave"]
-
-    raise RuntimeError(
-        "Konsave was not found, and pipx is unavailable. Install Konsave with "
-        "'pipx install konsave' or install pipx to run it on demand."
-    )
+    raise RuntimeError("Konsave is not installed. Apply a Linux desktop profile through Tools/Setup.py first.")

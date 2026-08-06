@@ -3,6 +3,9 @@ name = "konsave"
 description = "KDE configuration profile manager"
 depends_on = ["pipx"]
 
+[script_dependencies]
+after = ["configure_konsave.py"]
+
 [targets.linux.pipx]
 id = "konsave"
 
