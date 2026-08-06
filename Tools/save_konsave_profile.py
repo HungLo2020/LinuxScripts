@@ -6,7 +6,6 @@ from __future__ import annotations
 import argparse
 import os
 import re
-import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -16,6 +15,7 @@ if str(SOURCE_DIRECTORY) not in sys.path:
     sys.path.insert(0, str(SOURCE_DIRECTORY))
 
 from host import detect_host
+from konsave.command import resolve_konsave_command
 from konsave.releases import upload_profiles
 from paths import find_repository_root, profile_directory
 from process import require_command, run_command
@@ -29,22 +29,6 @@ def project_root() -> Path:
     """Resolve the project root from this module, independent of cwd."""
 
     return find_repository_root(Path(__file__).parent)
-
-
-def konsave_command() -> list[str]:
-    """Resolve Konsave directly or through pipx without shell command strings."""
-
-    local_bin = Path.home() / ".local" / "bin"
-    os.environ["PATH"] = f"{local_bin}{os.pathsep}{os.environ.get('PATH', '')}"
-
-    executable = shutil.which("konsave")
-    if executable:
-        return [executable]
-
-    if shutil.which("pipx"):
-        return ["pipx", "run", "konsave"]
-
-    raise RuntimeError("Konsave was not found, and pipx is unavailable.")
 
 
 def validate_profile_name(profile_name: str) -> str:
@@ -131,7 +115,7 @@ def main() -> int:
         raise RuntimeError(f"KDE profiles directory is not writable: {profiles_dir}")
 
     profile_name = choose_profile_name(args.name)
-    konsave = konsave_command()
+    konsave = resolve_konsave_command()
     save_profile(profile_name, profiles_dir, konsave)
 
     if args.upload or (not args.no_upload and ask_upload()):
