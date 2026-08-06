@@ -6,5 +6,5 @@ required_packages = []
 optional_packages = []
 
 [platforms.linux]
-required_packages = ["fastfetch"]
+required_packages = ["fastfetch", "tailscale"]
 optional_packages = []

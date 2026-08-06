@@ -51,6 +51,20 @@ def _apt_operation(packages: list[ResolvedPackage], package_manager: PackageMana
     )
 
 
+def _apt_deb_operation(packages: list[ResolvedPackage], package_manager: PackageManager | None) -> ProviderOperation:
+    if package_manager is not PackageManager.APT:
+        raise ProviderPlanningError("Local Debian package targets require an apt-based Linux distribution.")
+    identifiers = tuple(package.target.identifier for package in packages)
+    return ProviderOperation(
+        "apt_deb",
+        tuple(package.name for package in packages),
+        (
+            CommandSpec(("apt-get", "update"), "Refresh APT package metadata", elevated=True),
+            CommandSpec(("apt-get", "install", "-y", *identifiers), "Install local Debian packages", elevated=True),
+        ),
+    )
+
+
 def _flatpak_operation(packages: list[ResolvedPackage]) -> ProviderOperation:
     commands: list[CommandSpec] = []
     by_remote: OrderedDict[str, list[str]] = OrderedDict()
@@ -179,6 +193,8 @@ def plan_provider_operations(
     for provider, grouped_packages in _targets_by_provider(packages).items():
         if provider == "apt":
             operations.append(_apt_operation(grouped_packages, package_manager))
+        elif provider == "apt_deb":
+            operations.append(_apt_deb_operation(grouped_packages, package_manager))
         elif provider in {"dnf", "pacman", "zypper", "apk"}:
             operations.append(_native_linux_operation(provider, grouped_packages, package_manager))
         elif provider == "flatpak":

@@ -27,8 +27,8 @@ class PackagePlanningTests(unittest.TestCase):
         self.assertEqual(
             [package.name for package in plan.packages],
             [
-                "git", "curl", "ripgrep", "fastfetch", "qdirstat", "baobab", "kate", "konsole", "dolphin",
-                "flatpak", "mission-center", "snapd", "bitwarden", "bw", "discord", "variety", "papirus-icon-theme",
+                "git", "curl", "ripgrep", "fastfetch", "tailscale", "qdirstat", "baobab", "kate", "konsole", "dolphin",
+                "flatpak", "mission-center", "rustdesk", "snapd", "bitwarden", "bw", "discord", "variety", "papirus-icon-theme",
                 "github-cli", "npm", "codex-cli", "vscode", "kmines", "steam", "libreoffice", "pipx", "konsave",
             ],
         )
@@ -144,6 +144,17 @@ class PackagePlanningTests(unittest.TestCase):
         codex_step = next(index for index, step in enumerate(steps) if getattr(step, "packages", ()) == ("codex-cli",))
         self.assertIsInstance(steps[codex_step - 1], ScriptOperation)
         self.assertEqual(steps[codex_step - 1].description, "Run pre-install script for 'codex-cli': hello_world.py")
+
+    def test_remote_access_packages_use_ordered_linux_setup_hooks(self):
+        plan = resolve_profiles(["desktop"], self.catalog, self.profiles, "linux", ("apt",))
+        steps = plan_execution_steps(plan.packages, plan.profile_scripts, PackageManager.APT, plan.delete_packages)
+        tailscale_step = next(index for index, step in enumerate(steps) if getattr(step, "packages", ()) == ("tailscale",))
+        rustdesk_step = next(index for index, step in enumerate(steps) if getattr(step, "packages", ()) == ("rustdesk",))
+        self.assertEqual(steps[tailscale_step - 1].script, "setup_tailscale_repository.py")
+        self.assertEqual(steps[tailscale_step + 1].script, "configure_tailscale.py")
+        self.assertEqual(steps[rustdesk_step - 1].script, "download_rustdesk.py")
+        self.assertEqual(steps[rustdesk_step + 1].script, "configure_rustdesk.py")
+        self.assertEqual(steps[rustdesk_step].provider, "apt_deb")
 
     def test_linux_profile_removals_run_after_installations(self):
         plan = resolve_profiles(["gaming"], self.catalog, self.profiles, "linux", ("apt",))

@@ -11,7 +11,7 @@ from toml_reader import load_toml
 
 _PLATFORMS = {"linux", "mattos", "windows", "macos", "all"}
 _PROFILE_PLATFORMS = _PLATFORMS - {"all"}
-_PROVIDERS = {"apt", "dnf", "pacman", "zypper", "apk", "flatpak", "pipx", "npm", "snap", "winget", "homebrew"}
+_PROVIDERS = {"apt", "apt_deb", "dnf", "pacman", "zypper", "apk", "flatpak", "pipx", "npm", "snap", "winget", "homebrew"}
 _PROVIDER_OPTIONS = {
     "flatpak": {"remote"},
     "homebrew": {"kind"},

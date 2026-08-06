@@ -6,6 +6,6 @@ required_packages = []
 optional_packages = []
 
 [platforms.linux]
-required_packages = ["qdirstat", "baobab", "kate", "konsole", "dolphin", "mission-center"]
+required_packages = ["qdirstat", "baobab", "kate", "konsole", "dolphin", "mission-center", "rustdesk"]
 optional_packages = []
 delete_packages = ["plasma-vault", "krdc", "neochat", "konversation", "skanlite", "akregator", "dragonplayer", "gimp", "juk", "kdeconnect", "kmail", "kmouth", "konqueror", "korganizer", "kwrite", "anydesk"]
