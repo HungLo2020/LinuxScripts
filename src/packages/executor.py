@@ -2,10 +2,16 @@
 
 from __future__ import annotations
 
+import hashlib
 import os
 import sys
+import tempfile
+from contextlib import contextmanager
 from pathlib import Path
 from collections.abc import Iterable
+
+if os.name != "nt":
+    import fcntl
 
 from packages.models import CommandSpec, ProviderOperation, ScriptOperation
 from process import find_command, require_command, run_command
@@ -73,17 +79,38 @@ def validate_script_dependencies(operations: Iterable[ProviderOperation | Script
             _script_path(repository_root, operation.script)
 
 
+@contextmanager
+def execution_lock(repository_root: Path):
+    """Prevent concurrent package applies for the same checkout on POSIX hosts."""
+
+    if os.name == "nt":
+        yield
+        return
+    lock_name = hashlib.sha256(str(repository_root.resolve()).encode("utf-8")).hexdigest()[:16]
+    lock_path = Path(tempfile.gettempdir()) / f"linuxscripts-package-apply-{lock_name}.lock"
+    with lock_path.open("a+", encoding="utf-8") as lock_file:
+        try:
+            fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as error:
+            raise RuntimeError(f"Another package apply is already running for this checkout ({lock_path}).") from error
+        try:
+            yield
+        finally:
+            fcntl.flock(lock_file, fcntl.LOCK_UN)
+
+
 def execute_operations(operations: Iterable[ProviderOperation | ScriptOperation], repository_root: Path) -> None:
     """Execute provider operations in their planned order."""
 
-    for operation in operations:
-        if isinstance(operation, ScriptOperation):
-            script = _script_path(repository_root, operation.script)
-            print(operation.description)
-            run_command((sys.executable, str(script)), cwd=repository_root)
-            continue
-        _prepare_provider(operation.provider)
-        print(f"Provider: {operation.provider} ({', '.join(operation.packages)})")
-        for command in operation.commands:
-            print(f"  {command.description}")
-            run_command(_command_with_privileges(command))
+    with execution_lock(repository_root):
+        for operation in operations:
+            if isinstance(operation, ScriptOperation):
+                script = _script_path(repository_root, operation.script)
+                print(operation.description)
+                run_command((sys.executable, str(script)), cwd=repository_root)
+                continue
+            _prepare_provider(operation.provider)
+            print(f"Provider: {operation.provider} ({', '.join(operation.packages)})")
+            for command in operation.commands:
+                print(f"  {command.description}")
+                run_command(_command_with_privileges(command))

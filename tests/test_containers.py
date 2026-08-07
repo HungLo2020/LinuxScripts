@@ -64,6 +64,13 @@ class ContainerMigrationTests(unittest.TestCase):
         self.assertIn("ZIP backup manager", names)
         self.assertIn("Uptime Kuma", names)
 
+    def test_server_manager_launches_container_manager_as_current_user(self):
+        manager = load_tool("ServerManager.py")
+        with patch.object(manager.subprocess, "run") as run_command:
+            run_command.return_value.returncode = 0
+            self.assertEqual(manager.container_manager_action(), 0)
+        self.assertEqual(run_command.call_args.args[0][0], manager.sys.executable)
+
     def test_uptime_kuma_uses_legacy_container_paths_and_arguments(self):
         workload = UptimeKumaWorkload()
         with patch("containers.workloads.Docker") as docker_type, patch("containers.workloads.wait_for_http", return_value=True):

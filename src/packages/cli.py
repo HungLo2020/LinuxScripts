@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import shlex
+import subprocess
 import sys
 from pathlib import Path
 
@@ -129,7 +130,11 @@ def main(argv: list[str] | None = None) -> int:
         print("Error: apply requires --yes after reviewing the plan.", file=sys.stderr)
         return 2
 
-    execute_operations(result[-1], repository_root)
+    try:
+        execute_operations(result[-1], repository_root)
+    except (OSError, RuntimeError, subprocess.CalledProcessError) as error:
+        print(f"Error: package apply failed: {error}", file=sys.stderr)
+        return error.returncode or 1 if isinstance(error, subprocess.CalledProcessError) else 1
     return 0
 
 

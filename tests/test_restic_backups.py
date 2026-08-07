@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -50,6 +51,20 @@ class ResticBackupManagerTests(unittest.TestCase):
             self.assertEqual(config.repository, Path("/srv/legacy-repo"))
             self.assertEqual(config.source, Path("/srv/legacy-source"))
             self.assertEqual(manager.current_slug(), "mattmc")
+
+    def test_password_files_are_created_with_private_permissions(self):
+        with tempfile.TemporaryDirectory() as directory:
+            manager = self.manager(directory)
+            password = manager.password_path("mattmc")
+            with patch("server.restic_backups.os.open", wraps=os.open) as private_open:
+                manager.ensure_password(password)
+            self.assertEqual(password.stat().st_mode & 0o777, 0o600)
+            self.assertTrue(private_open.call_args.args[1] & os.O_EXCL)
+            self.assertEqual(private_open.call_args.args[2], 0o600)
+
+            manager.write_password(password, "replacement-secret")
+            self.assertEqual(password.read_text(encoding="utf-8"), "replacement-secret")
+            self.assertEqual(password.stat().st_mode & 0o777, 0o600)
 
     def test_generated_helper_reuses_the_legacy_name_and_noninteractive_cli(self):
         with tempfile.TemporaryDirectory() as directory:

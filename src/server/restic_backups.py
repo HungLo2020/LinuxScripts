@@ -245,14 +245,26 @@ class ResticBackupManager:
 
     def ensure_password(self, path: Path) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
-        if not path.is_file():
-            path.write_text(secrets.token_hex(32), encoding="utf-8")
-        path.chmod(0o600)
+        try:
+            descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        except FileExistsError:
+            if not path.is_file():
+                raise RuntimeError(f"password path is not a regular file: {path}")
+            path.chmod(0o600)
+            return
+        with os.fdopen(descriptor, "w", encoding="utf-8") as password_file:
+            password_file.write(secrets.token_hex(32))
 
     def write_password(self, path: Path, password: str) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(password, encoding="utf-8")
-        path.chmod(0o600)
+        temporary = path.with_name(f".{path.name}.tmp-{secrets.token_hex(8)}")
+        try:
+            descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            with os.fdopen(descriptor, "w", encoding="utf-8") as password_file:
+                password_file.write(password)
+            temporary.replace(path)
+        finally:
+            temporary.unlink(missing_ok=True)
 
     def ensure_repository_writable(self, repository: Path) -> None:
         """Match the legacy direct-then-sudo repository ownership strategy."""

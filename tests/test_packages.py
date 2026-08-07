@@ -1,7 +1,9 @@
+import subprocess
 import sys
 import tempfile
 import unittest
 import importlib.util
+from io import StringIO
 from pathlib import Path
 from unittest.mock import patch
 
@@ -9,7 +11,9 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from packages.catalog import load_catalog, load_package, load_profile, load_profiles
+from packages import cli
 from packages.cli import build_command_plan
+from packages.executor import execution_lock
 from packages.models import PackageDefinition, PackageTarget, ProfileDefinition, ProfilePackage, ScriptDependencies, ScriptOperation
 from packages.planner import PackageResolutionError, resolve_profiles
 from packages.providers import plan_execution_steps, plan_provider_operations, preferred_provider
@@ -161,6 +165,22 @@ class PackagePlanningTests(unittest.TestCase):
         self.assertEqual(platform_name, "linux")
         self.assertEqual(package_manager, PackageManager.APT)
         self.assertEqual(package_plan.profiles[-1], "server")
+
+    @unittest.skipIf(sys.platform == "win32", "POSIX file locking is not used on Windows.")
+    def test_package_execution_lock_rejects_a_second_apply(self):
+        root = Path(__file__).resolve().parents[1]
+        with execution_lock(root):
+            with self.assertRaisesRegex(RuntimeError, "Another package apply is already running"):
+                with execution_lock(root):
+                    pass
+
+    def test_cli_reports_provider_failure_with_the_process_exit_code(self):
+        result = (object(), "linux", PackageManager.APT, object(), ())
+        with patch.object(cli, "build_command_plan", return_value=result), patch.object(cli, "print_plan"), patch.object(
+            cli, "execute_operations", side_effect=subprocess.CalledProcessError(23, ("apt-get", "install"))
+        ), patch.object(cli.sys, "stderr", new_callable=StringIO) as error_output:
+            self.assertEqual(cli.main(("apply", "desktop", "--yes")), 23)
+        self.assertIn("Error: package apply failed:", error_output.getvalue())
 
     def test_coding_scripts_run_before_profile_and_codex_install(self):
         plan = resolve_profiles(["coding"], self.catalog, self.profiles, "linux", ("apt",))

@@ -33,14 +33,6 @@ from server.zip_backups import main as zip_backup_main
 from containers.run_uptime_kuma import main as uptime_kuma_main
 
 
-def ensure_elevated() -> None:
-    """Match the legacy manager by re-executing the tool as root when needed."""
-
-    if os.name != "nt" and os.geteuid() != 0:
-        print("Re-running with sudo...")
-        os.execvp("sudo", ("sudo", sys.executable, str(Path(__file__).resolve()), *sys.argv[1:]))
-
-
 def prompt_yes_no(question: str) -> bool:
     """Return True only for an explicit affirmative answer."""
 
