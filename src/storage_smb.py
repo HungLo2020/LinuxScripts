@@ -7,11 +7,12 @@ import getpass
 import json
 import os
 import pwd
-import shutil
 import subprocess
 import sys
 from dataclasses import asdict, dataclass
 from pathlib import Path
+
+from bitwarden import BitwardenClient, BitwardenError
 
 
 DEFAULT_SERVER = "100.72.33.98"
@@ -72,33 +73,12 @@ def tailscale_connected() -> bool:
 
 
 def bitwarden_password(item_name: str) -> str | None:
-    """Retrieve an SMB password from Bitwarden, with interactive login/unlock."""
+    """Retrieve an SMB password through the shared visible-prompt helper."""
 
-    if shutil.which("bw") is None:
-        return None
     try:
-        status = json.loads(subprocess.run(("bw", "status"), text=True, capture_output=True, check=True).stdout).get("status")
-        if status == "unauthenticated":
-            print("Bitwarden is not authenticated. Starting interactive login.")
-            subprocess.run(("bw", "login"), check=True)
-            status = json.loads(subprocess.run(("bw", "status"), text=True, capture_output=True, check=True).stdout).get("status")
-        if status == "locked":
-            print("Bitwarden is locked. Starting interactive unlock.")
-            master_password = getpass.getpass("Bitwarden master password: ")
-            environment = os.environ | {"BW_MASTER_PASSWORD": master_password}
-            session = subprocess.run(
-                ("bw", "unlock", "--passwordenv", "BW_MASTER_PASSWORD", "--nointeraction", "--raw"),
-                env=environment,
-                text=True,
-                check=True,
-                capture_output=True,
-            ).stdout.strip()
-            if not session:
-                return None
-            os.environ["BW_SESSION"] = session
-        password = subprocess.run(("bw", "get", "password", item_name), text=True, capture_output=True, check=True).stdout.strip()
-        return password or None
-    except (json.JSONDecodeError, subprocess.CalledProcessError):
+        return BitwardenClient(password_file=Path(__file__).resolve().parents[1] / ".bw_master_password").password(item_name)
+    except BitwardenError as error:
+        print(f"Bitwarden password lookup failed: {error}", file=sys.stderr)
         return None
 
 

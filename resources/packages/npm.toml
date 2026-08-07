@@ -3,7 +3,7 @@ name = "npm"
 description = "Node.js package manager"
 depends_on = []
 
-[targets.linux.apt]
+[targets.linux.nodejs]
 id = "npm"
 
 [targets.mattos.apt]

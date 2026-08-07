@@ -20,6 +20,8 @@ from enum import Enum
 from pathlib import Path
 from typing import Callable
 
+from bitwarden import BitwardenClient, BitwardenError
+
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 RESOURCES_DIRECTORY = REPOSITORY_ROOT / "resources"
@@ -567,30 +569,13 @@ class JellyfinWorkload(Workload):
         return media, music, downloads
 
     def bitwarden_credentials(self) -> tuple[str, str] | None:
-        if shutil.which("bw") is None:
-            return None
         item = os.environ.get("BITWARDEN_PROTONVPN_ITEM", "ProtonVPN")
-        status = subprocess.run(("bw", "status"), check=False, text=True, capture_output=True)
         try:
-            state = json.loads(status.stdout).get("status", "unknown")
-        except json.JSONDecodeError:
-            state = "unknown"
-        if state in {"unauthenticated", "unknown"}:
-            subprocess.run(("bw", "login"), check=False)
-        if state == "locked":
-            master_file = REPOSITORY_ROOT / ".bw_master_password"
-            environment = os.environ.copy()
-            if master_file.is_file():
-                environment["BW_MASTER_PASSWORD"] = master_file.read_text(encoding="utf-8").splitlines()[0]
-                unlocked = subprocess.run(("bw", "unlock", "--passwordenv", "BW_MASTER_PASSWORD", "--nointeraction", "--raw"), check=False, text=True, capture_output=True, env=environment)
-            else:
-                unlocked = subprocess.run(("bw", "unlock", "--raw"), check=False, text=True, capture_output=True)
-            if unlocked.returncode != 0 or not unlocked.stdout.strip():
-                return None
-            os.environ["BW_SESSION"] = unlocked.stdout.strip()
-        username = subprocess.run(("bw", "get", "username", item), check=False, text=True, capture_output=True).stdout.strip()
-        password = subprocess.run(("bw", "get", "password", item), check=False, text=True, capture_output=True).stdout.strip()
-        return (username, password) if username and password else None
+            client = BitwardenClient(password_file=REPOSITORY_ROOT / ".bw_master_password")
+            return client.username(item), client.password(item)
+        except BitwardenError as error:
+            log(f"Bitwarden credential lookup failed: {error}")
+            return None
 
     def write_installation(self, media: Path, music: Path, downloads: Path) -> None:
         credentials = self.bitwarden_credentials()

@@ -4,13 +4,18 @@
 from __future__ import annotations
 
 import getpass
-import json
 import os
 import re
-import shutil
 import subprocess
 import sys
 from pathlib import Path
+
+
+SOURCE_DIRECTORY = Path(__file__).resolve().parents[1]
+if str(SOURCE_DIRECTORY) not in sys.path:
+    sys.path.insert(0, str(SOURCE_DIRECTORY))
+
+from bitwarden import BitwardenClient, BitwardenError
 
 
 DEFAULT_BITWARDEN_ITEM = "PCPassword"
@@ -18,40 +23,13 @@ PASSWORD_FILE = Path(__file__).resolve().parents[2] / ".bw_master_password"
 CONFIG_PATH = "/root/.config/rustdesk/RustDesk2.toml"
 
 
-def command_output(command: tuple[str, ...], *, input_text: str | None = None) -> str:
-    """Run a command and return its stripped standard output."""
-
-    return subprocess.run(command, input=input_text, text=True, capture_output=True, check=True).stdout.strip()
-
-
 def bitwarden_password(item_name: str) -> str | None:
-    """Return a password from Bitwarden, or None when interactive fallback is needed."""
+    """Return a Bitwarden password without hiding the unlock prompt."""
 
-    if not shutil.which("bw"):
-        return None
     try:
-        status = json.loads(command_output(("bw", "status"))).get("status")
-        if status == "unauthenticated":
-            subprocess.run(("bw", "login"), check=True)
-            status = json.loads(command_output(("bw", "status"))).get("status")
-        if status == "locked":
-            if PASSWORD_FILE.is_file():
-                password = PASSWORD_FILE.read_text(encoding="utf-8").splitlines()[0]
-                environment = os.environ | {"BW_MASTER_PASSWORD": password}
-                session = subprocess.run(
-                    ("bw", "unlock", "--passwordenv", "BW_MASTER_PASSWORD", "--nointeraction", "--raw"),
-                    env=environment,
-                    text=True,
-                    capture_output=True,
-                    check=True,
-                ).stdout.strip()
-                os.environ["BW_SESSION"] = session
-            else:
-                session = command_output(("bw", "unlock", "--raw"))
-                os.environ["BW_SESSION"] = session
-        password = command_output(("bw", "get", "password", item_name))
-        return password or None
-    except (json.JSONDecodeError, subprocess.CalledProcessError, IndexError):
+        return BitwardenClient(password_file=PASSWORD_FILE).password(item_name)
+    except BitwardenError as error:
+        print(f"Bitwarden password lookup failed: {error}", file=sys.stderr)
         return None
 
 

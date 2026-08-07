@@ -4,17 +4,23 @@ from __future__ import annotations
 
 import hashlib
 import os
+import re
 import sys
 import tempfile
 from contextlib import contextmanager
 from pathlib import Path
 from collections.abc import Iterable
+from urllib.parse import urlparse
+from urllib.request import Request, urlopen
 
 if os.name != "nt":
     import fcntl
 
-from packages.models import CommandSpec, ProviderOperation, ScriptOperation
+from packages.models import CommandSpec, NodejsOperation, ProviderOperation, ScriptOperation, ShellInstallerOperation
 from process import find_command, require_command, run_command
+
+
+_SHELL_INSTALLER_USER_AGENT = "curl/8.5.0"
 
 
 def _command_with_privileges(command: CommandSpec) -> tuple[str, ...]:
@@ -71,12 +77,82 @@ def _prepare_provider(provider: str) -> None:
         raise RuntimeError("npm was not found after installing Node.js. Close and reopen PowerShell, then rerun the package apply command.")
 
 
-def validate_script_dependencies(operations: Iterable[ProviderOperation | ScriptOperation], repository_root: Path) -> None:
+def validate_script_dependencies(operations: Iterable[ProviderOperation | NodejsOperation | ShellInstallerOperation | ScriptOperation], repository_root: Path) -> None:
     """Fail planning before package installation when a declared script is unavailable."""
 
     for operation in operations:
         if isinstance(operation, ScriptOperation):
             _script_path(repository_root, operation.script)
+
+
+def _working_command(command: str) -> bool:
+    """Return whether a command can run successfully from the current PATH."""
+
+    if find_command(command) is None:
+        return False
+    try:
+        return run_command((command, "--version"), check=False).returncode == 0
+    except OSError:
+        return False
+
+
+def _nodesource_nodejs_candidate(policy: str) -> bool:
+    """Return whether APT's selected Node.js candidate is published by NodeSource."""
+
+    candidate = re.search(r"^\s*Candidate:\s*(\S+)", policy, re.MULTILINE)
+    if candidate is None or candidate.group(1) == "(none)":
+        return False
+    candidate_version = candidate.group(1)
+    sections = re.split(r"^\s{2,}(?=\S+\s+\d+\s*$)", policy, flags=re.MULTILINE)
+    return any(
+        re.match(rf"{re.escape(candidate_version)}\s+\d+\s*$", section, re.MULTILINE)
+        and "nodesource.com" in section
+        for section in sections
+    )
+
+
+def ensure_nodejs_npm() -> None:
+    """Ensure a compatible Node.js installation supplies both node and npm."""
+
+    if _working_command("node") and _working_command("npm"):
+        print("  Node.js and npm are already available.")
+        return
+    policy = run_command(("apt-cache", "policy", "nodejs"), capture_output=True).stdout
+    package = "nodejs" if _nodesource_nodejs_candidate(policy) else "npm"
+    source = "NodeSource nodejs" if package == "nodejs" else "distribution npm"
+    print(f"  Installing {source} to provide Node.js and npm.")
+    run_command(_command_with_privileges(CommandSpec(("apt-get", "update"), "Refresh APT package metadata", elevated=True)))
+    run_command(_command_with_privileges(CommandSpec(("apt-get", "install", "-y", package), "Install Node.js and npm", elevated=True)))
+    if not (_working_command("node") and _working_command("npm")):
+        raise RuntimeError("Node.js installation completed but node and npm are not both available on PATH.")
+
+
+def _validate_shell_installer_url(url: str) -> None:
+    parsed = urlparse(url)
+    if parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password:
+        raise RuntimeError("Shell installer URLs must use HTTPS and cannot include embedded credentials.")
+
+
+def run_shell_installer(url: str) -> None:
+    """Download an HTTPS installer to a private file and execute it as the current user."""
+
+    _validate_shell_installer_url(url)
+    installer_path: Path | None = None
+    try:
+        request = Request(url, headers={"User-Agent": _SHELL_INSTALLER_USER_AGENT})
+        with urlopen(request, timeout=60) as response:
+            _validate_shell_installer_url(response.geturl())
+            with tempfile.NamedTemporaryFile(prefix="linuxscripts-installer-", suffix=".sh", delete=False) as installer_file:
+                installer_path = Path(installer_file.name)
+                installer_path.chmod(0o600)
+                while chunk := response.read(1024 * 1024):
+                    installer_file.write(chunk)
+        if installer_path.stat().st_size == 0:
+            raise RuntimeError(f"Shell installer download was empty: {url}")
+        run_command(("sh", str(installer_path)))
+    finally:
+        if installer_path is not None:
+            installer_path.unlink(missing_ok=True)
 
 
 @contextmanager
@@ -99,7 +175,7 @@ def execution_lock(repository_root: Path):
             fcntl.flock(lock_file, fcntl.LOCK_UN)
 
 
-def execute_operations(operations: Iterable[ProviderOperation | ScriptOperation], repository_root: Path) -> None:
+def execute_operations(operations: Iterable[ProviderOperation | NodejsOperation | ShellInstallerOperation | ScriptOperation], repository_root: Path) -> None:
     """Execute provider operations in their planned order."""
 
     with execution_lock(repository_root):
@@ -108,6 +184,16 @@ def execute_operations(operations: Iterable[ProviderOperation | ScriptOperation]
                 script = _script_path(repository_root, operation.script)
                 print(operation.description)
                 run_command((sys.executable, str(script)), cwd=repository_root)
+                continue
+            if isinstance(operation, NodejsOperation):
+                print(f"Provider: nodejs ({', '.join(operation.packages)})")
+                ensure_nodejs_npm()
+                continue
+            if isinstance(operation, ShellInstallerOperation):
+                print(f"Provider: shell_installer ({', '.join(operation.packages)})")
+                for package, url in zip(operation.packages, operation.urls, strict=True):
+                    print(f"  Run shell installer for '{package}': {url}")
+                    run_shell_installer(url)
                 continue
             _prepare_provider(operation.provider)
             print(f"Provider: {operation.provider} ({', '.join(operation.packages)})")

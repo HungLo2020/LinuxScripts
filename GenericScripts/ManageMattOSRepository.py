@@ -84,7 +84,6 @@ short-lived R2 lock object detects concurrent writers.
 from __future__ import annotations
 
 import argparse
-import getpass
 import gzip
 import hashlib
 import importlib.util
@@ -101,6 +100,13 @@ import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable, Sequence
+
+
+SOURCE_DIRECTORY = Path(__file__).resolve().parents[1] / "src"
+if str(SOURCE_DIRECTORY) not in sys.path:
+    sys.path.insert(0, str(SOURCE_DIRECTORY))
+
+from bitwarden import BitwardenClient
 
 
 DEFAULT_R2_ITEM = "MattOS R2 Repository Publisher"
@@ -315,131 +321,13 @@ class Config:
         )
 
 
-def bitwarden_status_payload() -> tuple[str, str]:
-    result = run_command(["bw", "status", "--raw"], check=False)
-    if result.returncode != 0:
-        return "unknown", "status command failed"
-    try:
-        payload = json.loads(result.stdout)
-    except json.JSONDecodeError:
-        return "unknown", "invalid status response"
-    return str(payload.get("status", "unknown")), ""
-
-
-class Bitwarden:
+class Bitwarden(BitwardenClient):
     def __init__(self, *, non_interactive: bool, yes: bool) -> None:
-        self.non_interactive = non_interactive
-        self.yes = yes
-        self.ready = False
-
-    def ensure_cli(self) -> None:
-        if not command_exists("bw"):
-            raise AuthenticationError(
-                "Bitwarden CLI (bw) is not installed. Install the Bitwarden CLI "
-                "and ensure 'bw' is in PATH; this tool will not install it."
-            )
-
-    def _unlock_with_password(self, password: str) -> bool:
-        env = os.environ.copy()
-        env["BW_MASTER_PASSWORD"] = password
-        result = run_command(
-            ["bw", "unlock", "--passwordenv", "BW_MASTER_PASSWORD", "--nointeraction", "--raw"],
-            env=env,
-            check=False,
+        super().__init__(
+            password_file=PASSWORD_FILE,
+            non_interactive=non_interactive,
+            error_type=AuthenticationError,
         )
-        if result.returncode == 0 and result.stdout.strip():
-            os.environ["BW_SESSION"] = result.stdout.strip()
-            return True
-        return False
-
-    def ensure_session(self) -> None:
-        if self.ready:
-            return
-        self.ensure_cli()
-        status, _ = bitwarden_status_payload()
-        if status == "unlocked":
-            self.ready = True
-            return
-        if status == "unknown" and os.environ.get("BW_SESSION"):
-            os.environ.pop("BW_SESSION", None)
-            status, _ = bitwarden_status_payload()
-
-        if status == "unauthenticated":
-            if self.non_interactive:
-                raise AuthenticationError("Bitwarden is not logged in and --non-interactive was supplied")
-            print("Bitwarden login is required.")
-            login = run_command(["bw", "login"], check=False)
-            if login.returncode != 0:
-                raise AuthenticationError("Bitwarden login failed")
-            status, _ = bitwarden_status_payload()
-
-        if status not in {"locked", "unlocked"}:
-            raise AuthenticationError(f"Bitwarden authentication state is {status!r}")
-        if status == "unlocked":
-            self.ready = True
-            return
-
-        if PASSWORD_FILE.is_file():
-            password = PASSWORD_FILE.read_text(encoding="utf-8").rstrip("\n")
-            if self._unlock_with_password(password):
-                self.ready = True
-                return
-            print(f"Could not unlock Bitwarden using {PASSWORD_FILE}; prompting instead.", file=sys.stderr)
-        if self.non_interactive:
-            raise AuthenticationError("Bitwarden vault is locked and --non-interactive was supplied")
-        try:
-            password = getpass.getpass("Bitwarden master password: ")
-        except (EOFError, KeyboardInterrupt) as exc:
-            raise AuthenticationError("Bitwarden unlock was cancelled") from exc
-        if not self._unlock_with_password(password):
-            raise AuthenticationError("Bitwarden unlock failed")
-        self.ready = True
-
-    def list_items(self, name: str) -> list[dict[str, Any]]:
-        self.ensure_session()
-        result = run_command(["bw", "list", "items", "--search", name, "--raw"], check=False)
-        if result.returncode != 0:
-            raise AuthenticationError("Bitwarden item search failed; the session may be stale or inaccessible")
-        try:
-            items = json.loads(result.stdout)
-        except json.JSONDecodeError as exc:
-            raise AuthenticationError("Bitwarden returned an invalid item-search response") from exc
-        return items if isinstance(items, list) else []
-
-    def item(self, name: str, *, required: bool = True) -> dict[str, Any] | None:
-        matches = [item for item in self.list_items(name) if item.get("name") == name]
-        if not matches:
-            if required:
-                raise AuthenticationError(f"Bitwarden item not found: {name}")
-            return None
-        item_id = matches[0].get("id")
-        if not item_id:
-            raise AuthenticationError(f"Bitwarden item {name!r} has no readable ID")
-        result = run_command(["bw", "get", "item", str(item_id), "--raw"], check=False)
-        if result.returncode != 0:
-            raise AuthenticationError(f"Bitwarden item {name!r} is inaccessible")
-        try:
-            item = json.loads(result.stdout)
-        except json.JSONDecodeError as exc:
-            raise AuthenticationError(f"Bitwarden item {name!r} returned invalid JSON") from exc
-        if not isinstance(item, dict):
-            raise AuthenticationError(f"Bitwarden item {name!r} has invalid data")
-        return item
-
-    def create_secure_note(self, name: str, notes: str) -> None:
-        if self.item(name, required=False) is not None:
-            raise AuthenticationError(f"Refusing to overwrite existing Bitwarden item: {name}")
-        payload = json.dumps({"type": 2, "secureNote": {"type": 0}, "name": name, "notes": notes, "fields": []})
-        encoded = run_command(["bw", "encode"], input_text=payload).stdout
-        # bw accepts encoded JSON on stdin, so private key material never goes
-        # into argv or appears in process listings.
-        result = run_command(["bw", "create", "item"], input_text=encoded, check=False)
-        if result.returncode != 0:
-            raise AuthenticationError("Could not create the Bitwarden signing-key item")
-        stored = self.item(name, required=True)
-        stored_key = field_map(stored or {}).get("PRIVATE_KEY") or str((stored or {}).get("notes") or "")
-        if "BEGIN PGP PRIVATE KEY BLOCK" not in stored_key:
-            raise AuthenticationError("Bitwarden signing-key item was created but could not be validated")
 
 
 def field_map(item: dict[str, Any]) -> dict[str, str]:

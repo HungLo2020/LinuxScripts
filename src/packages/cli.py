@@ -11,7 +11,7 @@ from pathlib import Path
 from host import detect_host
 from packages.catalog import load_catalog, load_profiles
 from packages.executor import execute_operations, validate_script_dependencies
-from packages.models import ScriptOperation
+from packages.models import NodejsOperation, ScriptOperation, ShellInstallerOperation
 from packages.planner import PackageResolutionError, resolve_profiles
 from packages.providers import ProviderPlanningError, plan_execution_steps, preferred_provider
 from paths import find_repository_root
@@ -72,6 +72,15 @@ def print_plan(host, platform_name, package_manager, package_plan, operations) -
         if isinstance(operation, ScriptOperation):
             print(f"  script: {operation.script}")
             print(f"    {operation.description}")
+            continue
+        if isinstance(operation, NodejsOperation):
+            print(f"  nodejs: {', '.join(operation.packages)}")
+            print("    Ensure Node.js and npm are available")
+            continue
+        if isinstance(operation, ShellInstallerOperation):
+            print(f"  shell_installer: {', '.join(operation.packages)}")
+            for package, url in zip(operation.packages, operation.urls, strict=True):
+                print(f"    Run shell installer for '{package}': {url}")
             continue
         print(f"  {operation.provider}: {', '.join(operation.packages)}")
         for command in operation.commands:

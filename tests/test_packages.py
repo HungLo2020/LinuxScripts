@@ -5,7 +5,7 @@ import unittest
 import importlib.util
 from io import StringIO
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
@@ -13,8 +13,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from packages.catalog import load_catalog, load_package, load_profile, load_profiles
 from packages import cli
 from packages.cli import build_command_plan
-from packages.executor import execution_lock
-from packages.models import PackageDefinition, PackageTarget, ProfileDefinition, ProfilePackage, ScriptDependencies, ScriptOperation
+from packages.executor import _nodesource_nodejs_candidate, ensure_nodejs_npm, execution_lock, run_shell_installer
+from packages.models import NodejsOperation, PackageDefinition, PackageTarget, ProfileDefinition, ProfilePackage, ScriptDependencies, ScriptOperation, ShellInstallerOperation
 from packages.planner import PackageResolutionError, resolve_profiles
 from packages.providers import plan_execution_steps, plan_provider_operations, preferred_provider
 from server.btrfs_snapshots import BtrfsSnapshotManager
@@ -60,7 +60,7 @@ class PackagePlanningTests(unittest.TestCase):
             [
                 "git", "curl", "ripgrep", "openssh-server", "fastfetch", "tailscale", "qdirstat", "baobab", "kate", "konsole", "dolphin",
                 "flatpak", "mission-center", "rustdesk", "snapd", "bitwarden", "bw", "discord", "variety", "papirus-icon-theme",
-                "github-cli", "npm", "codex-cli", "vscode", "kmines", "steam", "libreoffice", "pipx", "konsave",
+                "github-cli", "codex-cli", "vscode", "kmines", "steam", "libreoffice", "pipx", "konsave",
             ],
         )
 
@@ -68,7 +68,7 @@ class PackagePlanningTests(unittest.TestCase):
         plan = resolve_profiles(["complete-desktop"], self.catalog, self.profiles, "mattos", ("apt",))
         self.assertEqual(
             [package.name for package in plan.packages],
-            ["git", "curl", "ripgrep", "snapd", "bitwarden", "bw", "flatpak", "discord", "github-cli", "npm", "codex-cli", "basalt"],
+            ["git", "curl", "ripgrep", "snapd", "bitwarden", "bw", "flatpak", "discord", "github-cli", "codex-cli", "basalt"],
         )
         platforms_by_package = {package.name: package.target.platform for package in plan.packages}
         self.assertEqual(platforms_by_package["basalt"], "mattos")
@@ -153,6 +153,71 @@ class PackagePlanningTests(unittest.TestCase):
         operations = plan_provider_operations(plan.packages, PackageManager.APT)
         self.assertEqual(operations[0].commands[1].argv[:3], ("apt-get", "install", "-y"))
         self.assertIn("pipx", operations[0].commands[1].argv)
+
+    def test_coding_uses_the_codex_shell_installer_without_npm(self):
+        plan = resolve_profiles(["coding"], self.catalog, self.profiles, "linux", ("apt",))
+        codex = next(package for package in plan.packages if package.name == "codex-cli")
+        self.assertEqual(codex.target.provider, "shell_installer")
+        self.assertNotIn("npm", [package.name for package in plan.packages])
+        steps = plan_execution_steps(plan.packages, plan.profile_scripts, PackageManager.APT)
+        self.assertIn(ShellInstallerOperation(("codex-cli",), ("https://chatgpt.com/codex/install.sh",)), steps)
+
+    def test_nodesource_candidate_detection_uses_the_selected_version(self):
+        self.assertTrue(
+            _nodesource_nodejs_candidate(
+                "nodejs:\n  Candidate: 24.19.0-1nodesource1\n  Version table:\n     24.19.0-1nodesource1 600\n        500 https://deb.nodesource.com/node_24.x nodistro/main amd64 Packages\n     20.19.4+dfsg-1 500\n        500 http://archive.ubuntu.com/ubuntu questing/universe amd64 Packages\n"
+            )
+        )
+        self.assertFalse(
+            _nodesource_nodejs_candidate(
+                "nodejs:\n  Candidate: 20.19.4+dfsg-1\n  Version table:\n     24.19.0-1nodesource1 500\n        500 https://deb.nodesource.com/node_24.x nodistro/main amd64 Packages\n     20.19.4+dfsg-1 600\n        500 http://archive.ubuntu.com/ubuntu questing/universe amd64 Packages\n"
+            )
+        )
+
+    def test_nodejs_capability_skips_apt_when_node_and_npm_work(self):
+        with patch("packages.executor._working_command", return_value=True), patch("packages.executor.run_command") as run_command:
+            ensure_nodejs_npm()
+        run_command.assert_not_called()
+
+    def test_nodejs_capability_installs_the_nodesource_candidate_when_needed(self):
+        policy = "nodejs:\n  Candidate: 24.19.0-1nodesource1\n  Version table:\n     24.19.0-1nodesource1 600\n        500 https://deb.nodesource.com/node_24.x nodistro/main amd64 Packages\n"
+        result = subprocess.CompletedProcess(("apt-cache", "policy", "nodejs"), 0, policy, "")
+        with patch("packages.executor._working_command", side_effect=(False, True, True)), patch(
+            "packages.executor._command_with_privileges", side_effect=lambda command: command.argv
+        ), patch("packages.executor.run_command", return_value=result) as run_command:
+            ensure_nodejs_npm()
+        commands = [call.args[0] for call in run_command.call_args_list]
+        self.assertIn(("apt-get", "install", "-y", "nodejs"), commands)
+        self.assertNotIn(("apt-get", "install", "-y", "npm"), commands)
+
+    def test_nodejs_capability_installs_distribution_npm_without_nodesource(self):
+        policy = "nodejs:\n  Candidate: 20.19.4+dfsg-1\n  Version table:\n     20.19.4+dfsg-1 500\n        500 http://archive.ubuntu.com/ubuntu questing/universe amd64 Packages\n"
+        result = subprocess.CompletedProcess(("apt-cache", "policy", "nodejs"), 0, policy, "")
+        with patch("packages.executor._working_command", side_effect=(False, True, True)), patch(
+            "packages.executor._command_with_privileges", side_effect=lambda command: command.argv
+        ), patch("packages.executor.run_command", return_value=result) as run_command:
+            ensure_nodejs_npm()
+        commands = [call.args[0] for call in run_command.call_args_list]
+        self.assertIn(("apt-get", "install", "-y", "npm"), commands)
+
+    def test_shell_installer_runs_a_private_download_with_sh(self):
+        url = "https://example.com/install.sh"
+        response = MagicMock()
+        response.geturl.return_value = url
+        response.read.side_effect = (b"echo installed\n", b"")
+        download = MagicMock()
+        download.__enter__.return_value = response
+        with patch("packages.executor.urlopen", return_value=download) as urlopen, patch(
+            "packages.executor.run_command"
+        ) as run_command:
+            run_shell_installer(url)
+        request = urlopen.call_args.args[0]
+        self.assertEqual(request.full_url, url)
+        self.assertEqual(request.get_header("User-agent"), "curl/8.5.0")
+        self.assertEqual(urlopen.call_args.kwargs, {"timeout": 60})
+        command = run_command.call_args.args[0]
+        self.assertEqual(command[0], "sh")
+        self.assertFalse(Path(command[1]).exists())
 
     def test_command_plan_builds_from_the_source_cli_module(self):
         root = Path(__file__).resolve().parents[1]
@@ -316,6 +381,11 @@ class PackagePlanningTests(unittest.TestCase):
                 "[package]\nname = 'invalid'\nunexpected = true\n\n[targets.linux.apt]\nid = 'invalid'\n",
                 encoding="utf-8",
             )
+            insecure_installer_path = root / "insecure-installer.toml"
+            insecure_installer_path.write_text(
+                "[package]\nname = 'insecure'\n\n[targets.linux.shell_installer]\nid = 'http://example.com/install.sh'\n",
+                encoding="utf-8",
+            )
             profile_path = root / "invalid-profile.toml"
             profile_path.write_text(
                 "[profile]\nname = 'invalid'\nrequired_packages = []\noptional_packages = []\n\n[platforms.linix]\nrequired_packages = []\noptional_packages = []\n",
@@ -325,6 +395,8 @@ class PackagePlanningTests(unittest.TestCase):
                 load_package(package_path)
             with self.assertRaisesRegex(ValueError, "unsupported platform 'linix'"):
                 load_profile(profile_path)
+            with self.assertRaisesRegex(ValueError, "must be an HTTPS URL"):
+                load_package(insecure_installer_path)
 
     def test_unknown_profile_is_rejected(self):
         with self.assertRaises(PackageResolutionError):

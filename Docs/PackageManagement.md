@@ -112,7 +112,11 @@ Use `python3 Tools/Setup.py plan complete-desktop --platform mattos` to preview 
 
 ## Providers
 
-The initial providers are APT, DNF, Pacman, Zypper, APK, Flatpak, pipx, Snap, Winget, and Homebrew. Native Linux provider selection uses `src/system.py` to read the distro and available package manager.
+The initial providers are APT, DNF, Pacman, Zypper, APK, Flatpak, pipx, npm, Node.js/npm capability, shell installer, Snap, Winget, and Homebrew. Native Linux provider selection uses `src/system.py` to read the distro and available package manager.
+
+On APT-based Linux systems, the logical `npm` package uses the Node.js/npm capability provider rather than always installing the distribution package named `npm`. It first reuses a working `node` and `npm` runtime. If installation is needed and APT selects a NodeSource `nodejs` candidate, it installs `nodejs`, which supplies its matching npm. Otherwise it installs the distribution `npm` package. This prevents mixing NodeSource Node.js with Ubuntu or Debian's incompatible standalone npm package.
+
+The `shell_installer` provider supports packages published as a remote shell installer. Its target `id` is a direct HTTPS URL without embedded credentials. The plan displays the exact URL. During apply, Setup downloads it to a private temporary file and runs `sh` as the invoking user; it never pipes a download into a shell or adds `sudo`. An installer can request elevation itself when its own workflow requires it. Codex CLI uses this provider on Linux, MattOS, and macOS through its official installer; its Windows target remains npm-based.
 
 Provider logic is responsible only for translating resolved targets into commands. `src/packages/executor.py` performs those commands after explicit CLI confirmation. Profiles never contain shell commands, installer URLs, or privilege logic.
 

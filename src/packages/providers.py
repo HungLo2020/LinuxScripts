@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections import OrderedDict
 from collections.abc import Iterable
 
-from packages.models import CommandSpec, PackageTarget, ProviderOperation, ResolvedPackage, ScriptOperation
+from packages.models import CommandSpec, NodejsOperation, PackageTarget, ProviderOperation, ResolvedPackage, ScriptOperation, ShellInstallerOperation
 from system import PackageManager
 
 
@@ -141,6 +141,19 @@ def _npm_operation(packages: list[ResolvedPackage]) -> ProviderOperation:
     return ProviderOperation("npm", tuple(package.name for package in packages), commands)
 
 
+def _nodejs_operation(packages: list[ResolvedPackage], package_manager: PackageManager | None) -> NodejsOperation:
+    if package_manager is not PackageManager.APT:
+        raise ProviderPlanningError("Node.js capability targets require an apt-based Linux distribution.")
+    return NodejsOperation(tuple(package.name for package in packages))
+
+
+def _shell_installer_operation(packages: list[ResolvedPackage]) -> ShellInstallerOperation:
+    return ShellInstallerOperation(
+        tuple(package.name for package in packages),
+        tuple(package.target.identifier for package in packages),
+    )
+
+
 def _snap_operation(packages: list[ResolvedPackage]) -> ProviderOperation:
     commands = tuple(
         CommandSpec(
@@ -186,10 +199,10 @@ def _homebrew_operation(packages: list[ResolvedPackage]) -> ProviderOperation:
 def plan_provider_operations(
     packages: Iterable[ResolvedPackage],
     package_manager: PackageManager | None,
-) -> tuple[ProviderOperation, ...]:
+) -> tuple[ProviderOperation | NodejsOperation | ShellInstallerOperation, ...]:
     """Build batched install commands for all selected provider targets."""
 
-    operations: list[ProviderOperation] = []
+    operations: list[ProviderOperation | NodejsOperation | ShellInstallerOperation] = []
     for provider, grouped_packages in _targets_by_provider(packages).items():
         if provider == "apt":
             operations.append(_apt_operation(grouped_packages, package_manager))
@@ -203,6 +216,10 @@ def plan_provider_operations(
             operations.append(_pipx_operation(grouped_packages))
         elif provider == "npm":
             operations.append(_npm_operation(grouped_packages))
+        elif provider == "nodejs":
+            operations.append(_nodejs_operation(grouped_packages, package_manager))
+        elif provider == "shell_installer":
+            operations.append(_shell_installer_operation(grouped_packages))
         elif provider == "snap":
             operations.append(_snap_operation(grouped_packages))
         elif provider == "winget":
@@ -256,10 +273,10 @@ def plan_execution_steps(
     profile_scripts: Iterable[str],
     package_manager: PackageManager | None,
     delete_packages: Iterable[str] = (),
-) -> tuple[ProviderOperation | ScriptOperation, ...]:
+) -> tuple[ProviderOperation | NodejsOperation | ShellInstallerOperation | ScriptOperation, ...]:
     """Build execution steps while honoring profile and package script boundaries."""
 
-    steps: list[ProviderOperation | ScriptOperation] = [
+    steps: list[ProviderOperation | NodejsOperation | ShellInstallerOperation | ScriptOperation] = [
         ScriptOperation(script, f"Run profile dependency script '{script}'") for script in profile_scripts
     ]
     pending: list[ResolvedPackage] = []

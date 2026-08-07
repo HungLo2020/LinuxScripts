@@ -96,6 +96,21 @@ class ProviderOperation:
 
 
 @dataclass(frozen=True)
+class NodejsOperation:
+    """Ensure a Linux Node.js installation provides both node and npm."""
+
+    packages: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class ShellInstallerOperation:
+    """Download and run one HTTPS shell installer for each logical package."""
+
+    packages: tuple[str, ...]
+    urls: tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class ScriptOperation:
     """One repository Python script scheduled as part of an apply plan."""
 

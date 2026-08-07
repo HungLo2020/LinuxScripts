@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 from packages.models import PackageDefinition, PackageTarget, ProfileDefinition, ProfilePackage, ScriptDependencies
 from toml_reader import load_toml
@@ -11,7 +12,7 @@ from toml_reader import load_toml
 
 _PLATFORMS = {"linux", "mattos", "windows", "macos", "all"}
 _PROFILE_PLATFORMS = _PLATFORMS - {"all"}
-_PROVIDERS = {"apt", "apt_deb", "dnf", "pacman", "zypper", "apk", "flatpak", "pipx", "npm", "snap", "winget", "homebrew"}
+_PROVIDERS = {"apt", "apt_deb", "dnf", "pacman", "zypper", "apk", "flatpak", "pipx", "npm", "nodejs", "shell_installer", "snap", "winget", "homebrew"}
 _PROVIDER_OPTIONS = {
     "flatpak": {"remote"},
     "homebrew": {"kind"},
@@ -49,6 +50,12 @@ def _package_script_dependencies(value: Any, label: str) -> ScriptDependencies:
     )
 
 
+def _validate_shell_installer_url(url: str, label: str) -> None:
+    parsed = urlparse(url)
+    if parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password:
+        raise ValueError(f"{label} must be an HTTPS URL without embedded credentials.")
+
+
 def load_package(path: Path) -> PackageDefinition:
     """Load one logical package and all of its provider targets."""
 
@@ -84,6 +91,8 @@ def load_package(path: Path) -> PackageDefinition:
                 raise ValueError(f"Package '{name}' has unsupported provider '{provider_name}'.")
             if not isinstance(target, dict) or not isinstance(target.get("id"), str) or not target["id"]:
                 raise ValueError(f"Package '{name}' target '{platform_name}.{provider_name}' needs an id.")
+            if provider_name == "shell_installer":
+                _validate_shell_installer_url(target["id"], f"Package '{name}' target '{platform_name}.{provider_name}' id")
             allowed_target_keys = {"id", "depends_on", *_PROVIDER_OPTIONS.get(provider_name, set())}
             _validate_keys(target, allowed_target_keys, f"Package '{name}' target '{platform_name}.{provider_name}'")
             for option in _PROVIDER_OPTIONS.get(provider_name, set()):
