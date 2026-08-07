@@ -12,8 +12,6 @@ import sys
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
-from bitwarden import BitwardenClient, BitwardenError
-
 
 DEFAULT_SERVER = "100.72.33.98"
 DEFAULT_SHARE = "storage"
@@ -74,6 +72,8 @@ def tailscale_connected() -> bool:
 
 def bitwarden_password(item_name: str) -> str | None:
     """Retrieve an SMB password through the shared visible-prompt helper."""
+
+    from bitwarden import BitwardenClient, BitwardenError
 
     try:
         return BitwardenClient(password_file=Path(__file__).resolve().parents[1] / ".bw_master_password").password(item_name)
