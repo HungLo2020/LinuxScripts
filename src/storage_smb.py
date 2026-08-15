@@ -104,9 +104,14 @@ def write_root_file(path: Path, contents: str, mode: str) -> None:
 
 
 def install_prerequisites() -> None:
-    """Install the SMB client and mount tools needed by the generated helper."""
+    """Install the SMB client and mount tools needed by the generated helper.
 
-    sudo(("apt-get", "update"))
+    Do not refresh every configured APT source here.  A mount is independent of
+    unrelated third-party repositories, and ``apt-get install`` can use the
+    package lists already present on the machine (and is a no-op when these
+    packages are installed).
+    """
+
     sudo(("apt-get", "install", "-y", "smbclient", "cifs-utils"))
 
 
@@ -174,8 +179,12 @@ def configure_interactively() -> None:
     install_helper()
     write_root_file(SERVICE_PATH, service_contents(), "0644")
     sudo(("systemctl", "daemon-reload"))
+    sudo(("systemctl", "reset-failed", SERVICE_NAME), check=False)
     sudo(("systemctl", "enable", SERVICE_NAME))
-    sudo(("systemctl", "restart", SERVICE_NAME), check=False)
+    # Do not make interactive setup wait for a potentially unavailable server.
+    # The service's Restart=on-failure policy handles boot-time and transient
+    # Tailscale/SMB availability; --no-block only queues its first attempt.
+    sudo(("systemctl", "restart", "--no-block", SERVICE_NAME))
     print(f"Storage mount service enabled: {SERVICE_NAME}")
     print(f"It retries every 20 seconds until //{server}/{share} is mounted at {mount_point}.")
 
@@ -187,7 +196,11 @@ def mount_from_config(configuration: MountConfiguration) -> int:
         raise RuntimeError("Tailscale is not connected.")
     mount_point = Path(configuration.mount_point)
     mount_point.mkdir(parents=True, exist_ok=True)
-    existing = subprocess.run(("findmnt", "-rn", "--target", str(mount_point), "-o", "SOURCE"), text=True, capture_output=True, check=False)
+    # ``--target`` reports the filesystem *containing* a directory (usually
+    # the root filesystem).  We need to detect only a mount whose mountpoint
+    # is exactly the configured directory, otherwise every normal directory
+    # is incorrectly rejected as already in use after boot.
+    existing = subprocess.run(("findmnt", "-rn", "--mountpoint", str(mount_point), "-o", "SOURCE"), text=True, capture_output=True, check=False)
     expected_source = f"//{configuration.server}/{configuration.share}"
     if existing.returncode == 0:
         if existing.stdout.strip() == expected_source:

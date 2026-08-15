@@ -18,7 +18,7 @@ from packages.models import NodejsOperation, PackageDefinition, PackageTarget, P
 from packages.planner import PackageResolutionError, resolve_profiles
 from packages.providers import plan_execution_steps, plan_provider_operations, preferred_provider
 from server.btrfs_snapshots import BtrfsSnapshotManager
-from storage_smb import LEGACY_HELPER_PATH, MountConfiguration, retire_legacy_implementation, service_contents, sudo
+from storage_smb import LEGACY_HELPER_PATH, MountConfiguration, install_prerequisites, mount_from_config, retire_legacy_implementation, service_contents, sudo
 from host import HostPlatform
 from system import LinuxDistro, PackageManager, detect_package_platform
 from konsave.apply import choose_profile
@@ -349,6 +349,24 @@ class PackagePlanningTests(unittest.TestCase):
         with patch("storage_smb.subprocess.run") as run_command:
             sudo(("systemctl", "disable", "--now", "storage-smb-mount.service"), check=False)
         self.assertFalse(run_command.call_args.kwargs["check"])
+
+    def test_storage_mount_prerequisites_do_not_refresh_unrelated_apt_sources(self):
+        with patch("storage_smb.sudo") as run_privileged:
+            install_prerequisites()
+        self.assertEqual(
+            [call.args[0] for call in run_privileged.call_args_list],
+            [("apt-get", "install", "-y", "smbclient", "cifs-utils")],
+        )
+
+    def test_storage_mount_checks_for_an_exact_mountpoint(self):
+        configuration = MountConfiguration("100.72.33.98", "storage", "/mnt/storage", "/etc/samba/credentials-storage-matt", 1000, 1000)
+        unmounted = type("Result", (), {"returncode": 1, "stdout": ""})()
+        with patch("storage_smb.tailscale_connected", return_value=True), patch("storage_smb.subprocess.run", return_value=unmounted) as run_command:
+            self.assertEqual(mount_from_config(configuration), 0)
+        self.assertEqual(
+            run_command.call_args_list[0].args[0],
+            ("findmnt", "-rn", "--mountpoint", "/mnt/storage", "-o", "SOURCE"),
+        )
 
     def test_btrfs_snapshot_manager_parses_legacy_subvolume_output(self):
         output = "ID 257 gen 10 parent 5 top level 5 path snapshots/@data-2026-08-06-1200\n"
