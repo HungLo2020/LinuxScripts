@@ -140,7 +140,15 @@ def service_definition(config: "ServerConfig", user: str) -> str:
 
 
 def install_service(config: "ServerConfig", user: str) -> None:
-    """Install and enable the generated service, updating only its own unit."""
+    """Recreate the generated service so changed settings take effect immediately."""
+    if SERVICE_PATH.exists():
+        # A running unit keeps its old environment even after its unit file is
+        # overwritten. Stop and remove only this managed unit before replacing
+        # it, so setup is idempotent and configuration changes are applied.
+        privileged(["systemctl", "stop", SERVICE_NAME])
+        privileged(["systemctl", "disable", SERVICE_NAME])
+        privileged(["rm", "-f", str(SERVICE_PATH)])
+        privileged(["systemctl", "daemon-reload"])
     with tempfile.NamedTemporaryFile("w", encoding="utf-8", prefix="mattos-repository-", suffix=".service", delete=False) as temporary:
         temporary.write(service_definition(config, user))
         source = Path(temporary.name)
