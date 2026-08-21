@@ -1,27 +1,40 @@
 # Homelab Setup
 
-This homelab is split across three roles: a Cloudflare-hosted Debian package repository, a DigitalOcean monitoring node, and a home server that runs the primary application containers.
+This homelab is split across three roles: a home-server Debian package
+repository, a DigitalOcean monitoring node, and a home server that runs the
+primary application containers.
 
 ```mermaid
 flowchart LR
-    Clients[Linux and MattOS clients] --> Repo[Cloudflare public Debian repository]
-    Repo --> R2[Cloudflare R2 bucket: matt-apt-repo]
+    Clients[Linux and MattOS clients] --> Repo[Home-server HTTPS Debian repository]
+    Repo --> Builder[Local reprepro repository manager]
     Discord[Discord server] <-->|Alerts and notifications| Kuma[Uptime Kuma on DigitalOcean]
     Kuma --> Home[Home server]
     Home --> Apps[Home server containers]
 ```
 
-## Cloudflare Debian Repository
+## Home-server Debian Repository
 
-The MattOS Debian APT repository is published through Cloudflare R2 and served publicly at:
+The MattOS Debian APT repository is built and signed on the home server and
+served over HTTPS at the configured repository URL.
 
 ```text
 https://packages.mattsherfey.com
 ```
 
-The repository manager is [../GenericScripts/ManageMattOSRepository.py](../GenericScripts/ManageMattOSRepository.py). Its default R2 bucket is `matt-apt-repo`; it publishes the `trixie` suite, `main` component, and `amd64` packages. The tool signs repository metadata with the `MattOS Repository Signing Key` stored in Bitwarden and obtains R2 credentials from the `MattOS R2 Repository Publisher` Bitwarden item.
+The compatibility client is
+[../GenericScripts/ManageMattOSRepository.py](../GenericScripts/ManageMattOSRepository.py).
+The home-server manager is
+[../Tools/ManageMattOSRepositoryServer.py](../Tools/ManageMattOSRepositoryServer.py).
+The server publishes the `trixie` suite, `main` component, and `amd64`
+packages. It keeps the private signing key on the server and exposes only the
+public key to clients.
 
-Cloudflare R2 is the persistent package source of truth. The publication tool rebuilds the repository from the remote package set, uploads packages before indexes, uploads signed metadata last, and uses a short-lived remote lock to avoid concurrent publishers.
+The server's persistent `reprepro` state is the package source of truth. Each
+operation builds a new release directory from the active release and switches
+the `current` symlink only after indexes and signatures are complete. A file
+lock serializes concurrent operations. Clients upload only the package being
+added; they never download and rebuild the repository.
 
 ## DigitalOcean Monitoring Node
 
@@ -81,7 +94,7 @@ qBittorrent uses Gluetun's network namespace, keeping torrent traffic inside the
 
 ## Operational Boundaries
 
-- Cloudflare hosts and serves the Debian package repository; it does not run the home-server application containers.
+- The home server builds and serves the Debian package repository.
 - The DigitalOcean droplet runs Uptime Kuma and relays monitoring events to Discord.
 - The home server runs Homepage, Portainer, the Ollama/Open WebUI stack, AUTOMATIC1111, and the Jellyfin media stack.
 - Uptime Kuma is deliberately outside the normal home-server Container Manager queue because its monitoring value depends on being independent from the services it monitors.
