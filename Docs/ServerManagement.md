@@ -22,17 +22,17 @@ it. Bitwarden is used only when the server needs credentials or the signing
 key; cached credentials are reused afterward.
 
 The API binds to the server's Tailscale IPv4 address when Tailscale is
-available. The compatibility client defaults to:
+available. The installed service uses Tailscale membership as its access
+boundary, so clients do not need a copied token or Bitwarden authentication.
+The compatibility client defaults to:
 
 ```text
 http://hunglosvr:8790
 ```
 
-This means existing projects need no repository URL setting. They only need
-the current compatible `ManageMattOSRepository.py` file and access to the
-tailnet. The server setup provisions the token for the setup user's normal
-client location. Other machines need the same token installed once in
-`~/.config/mattos-repository/token`; projects do not need separate settings.
+This means existing projects need no repository URL, token, or per-project
+setting. They only need the current compatible
+`ManageMattOSRepository.py` file and access to the tailnet.
 
 The built-in service serves the public repository locally as `/repository/`.
 Cloudflare R2 remains the public APT publication target, so normal APT users

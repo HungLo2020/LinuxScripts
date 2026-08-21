@@ -5,6 +5,7 @@ from __future__ import annotations
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 
@@ -44,6 +45,11 @@ class MattOSRepositoryTests(unittest.TestCase):
         self.assertEqual(parser.parse_args(["add", "package.deb"]).command, "add")
         self.assertEqual(parser.parse_args(["upload", "package.deb"]).command, "upload")
         self.assertEqual(parser.parse_args(["export-key", "--output", "key.asc"]).command, "export-key")
+
+    def test_default_client_uses_tailscale_server_without_token(self):
+        with patch.dict("os.environ", {}, clear=True):
+            config = client.Config.from_env()
+        self.assertEqual(config.server_url, "http://hunglosvr:8790")
 
 
 if __name__ == "__main__":

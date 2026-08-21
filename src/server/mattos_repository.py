@@ -133,6 +133,7 @@ def service_definition(config: "ServerConfig", user: str) -> str:
         "[Service]", "Type=simple", f"User={user}", f"WorkingDirectory={script.parent.parent}",
         f"Environment=MATTOS_REPOSITORY_ROOT={config.root}", f"Environment=MATTOS_REPOSITORY_TOKEN_FILE={config.token_file}",
         f"Environment=MATTOS_REPOSITORY_PUBLIC_URL={config.public_url}",
+        "Environment=MATTOS_REPOSITORY_ALLOW_ANONYMOUS=1",
         f"ExecStart=/usr/bin/python3 {script} serve --bind {bind} --port {os.environ.get('MATTOS_REPOSITORY_PORT', str(DEFAULT_PORT))}",
         "Restart=on-failure", "RestartSec=5", "", "[Install]", "WantedBy=multi-user.target", "",
     ))
@@ -537,6 +538,8 @@ class RepositoryHandler(BaseHTTPRequestHandler):
         return self.server.manager  # type: ignore[attr-defined]
 
     def _authorized(self) -> bool:
+        if os.environ.get("MATTOS_REPOSITORY_ALLOW_ANONYMOUS") == "1":
+            return True
         expected = self.server.token  # type: ignore[attr-defined]
         if not expected:
             return True

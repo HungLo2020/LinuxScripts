@@ -26,10 +26,10 @@ The client defaults to the existing Tailscale MagicDNS name `hunglosvr` on port
 python3 GenericScripts/ManageMattOSRepository.py upload package.deb
 ```
 
-Install the token once per client machine at
-`~/.config/mattos-repository/token`. A machine-wide override can be placed in
-`/etc/mattos-repository/client.conf`; the client still has no Cloudflare, R2,
-boto3, or Bitwarden dependency.
+No token or Bitwarden setup is needed on client machines: the installed server
+uses Tailscale membership as the access boundary. A machine-wide URL override
+can still be placed in `/etc/mattos-repository/client.conf`; the client has no
+Cloudflare, R2, boto3, or Bitwarden dependency.
 
 On the home server, initialize and run the separate server manager:
 
