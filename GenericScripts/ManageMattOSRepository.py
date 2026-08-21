@@ -26,15 +26,17 @@ SOURCE_DIRECTORY = Path(__file__).resolve().parents[1] / "src"
 if str(SOURCE_DIRECTORY) not in sys.path:
     sys.path.insert(0, str(SOURCE_DIRECTORY))
 
-DEFAULT_SERVER_URL = "http://127.0.0.1:8790"
-DEFAULT_PUBLIC_URL = "http://127.0.0.1:8790/repository"
-DEFAULT_R2_ITEM = "Deprecated: local server backend"
-DEFAULT_GPG_ITEM = "Deprecated: signing key is server-owned"
-DEFAULT_BUCKET = ""
+DEFAULT_SERVER_URL = "http://hunglosvr:8790"
+DEFAULT_PUBLIC_URL = "https://packages.mattsherfey.com"
+DEFAULT_R2_ITEM = "MattOS R2 Repository Publisher"
+DEFAULT_GPG_ITEM = "MattOS Repository Signing Key"
+DEFAULT_BUCKET = "matt-apt-repo"
 DEFAULT_SUITE = "trixie"
 DEFAULT_COMPONENT = "main"
 DEFAULT_REPOSITORY_ARCHITECTURES = ("amd64",)
 DEFAULT_TOKEN_FILE = Path.home() / ".config" / "mattos-repository" / "token"
+SYSTEM_TOKEN_FILE = Path("/etc/mattos-repository/client-token")
+SERVER_CONFIG_FILE = Path("/etc/mattos-repository/client.conf")
 
 
 class AppError(Exception):
@@ -118,13 +120,27 @@ class Config:
 
     @classmethod
     def from_env(cls) -> "Config":
-        token_path = Path(os.environ.get("MATTOS_REPOSITORY_TOKEN_FILE", str(DEFAULT_TOKEN_FILE))).expanduser()
+        file_values: dict[str, str] = {}
+        for candidate in (SERVER_CONFIG_FILE, Path.home() / ".config" / "mattos-repository" / "client.conf"):
+            if candidate.is_file():
+                for line in candidate.read_text(encoding="utf-8").splitlines():
+                    key, separator, value = line.partition("=")
+                    if separator and key.strip() and value.strip():
+                        file_values[key.strip()] = value.strip()
+                break
+        server_url = os.environ.get("MATTOS_REPOSITORY_SERVER_URL", file_values.get("SERVER_URL", DEFAULT_SERVER_URL)).rstrip("/")
+        token_value = os.environ.get("MATTOS_REPOSITORY_TOKEN_FILE") or file_values.get("TOKEN_FILE")
+        token_path = Path(token_value).expanduser() if token_value else DEFAULT_TOKEN_FILE
         return cls(
+            r2_item=os.environ.get("MATTOS_R2_ITEM", DEFAULT_R2_ITEM),
+            gpg_item=os.environ.get("MATTOS_GPG_ITEM", DEFAULT_GPG_ITEM),
+            bucket=os.environ.get("MATTOS_R2_BUCKET", DEFAULT_BUCKET),
+            endpoint=os.environ.get("MATTOS_R2_ENDPOINT", ""),
             public_url=os.environ.get("MATTOS_REPOSITORY_URL", DEFAULT_PUBLIC_URL).rstrip("/"),
             suite=os.environ.get("MATTOS_REPOSITORY_SUITE", DEFAULT_SUITE),
             component=os.environ.get("MATTOS_REPOSITORY_COMPONENT", DEFAULT_COMPONENT),
             architectures=validate_architectures(os.environ.get("MATTOS_REPOSITORY_ARCHITECTURES", "amd64")),
-            server_url=os.environ.get("MATTOS_REPOSITORY_SERVER_URL", DEFAULT_SERVER_URL).rstrip("/"),
+            server_url=server_url,
             token_file=token_path,
         )
 
@@ -207,8 +223,13 @@ class ServerRepository:
     def __init__(self, config: Config) -> None:
         self.config = config
         token = os.environ.get("MATTOS_REPOSITORY_TOKEN")
-        if token is None and config.token_file.is_file():
-            token = config.token_file.read_text(encoding="utf-8").strip()
+        token_candidates = [config.token_file, SYSTEM_TOKEN_FILE]
+        if token is None:
+            for candidate in token_candidates:
+                if candidate.is_file():
+                    token = candidate.read_text(encoding="utf-8").strip()
+                    if token:
+                        break
         self.token = token or ""
 
     def request(self, method: str, endpoint: str, *, body: bytes | None = None,

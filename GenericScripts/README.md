@@ -19,29 +19,27 @@ python3 GenericScripts/ManageMattOSRepository.py status
 python3 GenericScripts/ManageMattOSRepository.py upload /absolute/path/package.deb
 ```
 
-Configure clients with:
+The client defaults to the existing Tailscale MagicDNS name `hunglosvr` on port
+8790, so projects do not need per-project configuration:
 
 ```bash
-export MATTOS_REPOSITORY_SERVER_URL=https://repo-api.example
-export MATTOS_REPOSITORY_URL=https://repo.example/repository
-export MATTOS_REPOSITORY_TOKEN_FILE=$HOME/.config/mattos-repository/token
+python3 GenericScripts/ManageMattOSRepository.py upload package.deb
 ```
 
-The token file must contain the credential created by the server's `token`
-command. The client has no Cloudflare, R2, boto3, or Bitwarden dependency.
+Install the token once per client machine at
+`~/.config/mattos-repository/token`. A machine-wide override can be placed in
+`/etc/mattos-repository/client.conf`; the client still has no Cloudflare, R2,
+boto3, or Bitwarden dependency.
 
 On the home server, initialize and run the separate server manager:
 
 ```bash
-python3 Tools/ManageMattOSRepositoryServer.py init
-python3 Tools/ManageMattOSRepositoryServer.py token
-python3 Tools/ManageMattOSRepositoryServer.py serve --bind 127.0.0.1
+python3 Tools/ServerManager.py
 ```
 
-The service itself serves `/repository/` from the active release. A reverse
-proxy is optional if HTTPS or a custom hostname is needed. Keep the mutation
-API private behind Tailscale, a VPN, or an authenticated reverse proxy.
+Choose `MattOS repository setup`. It installs dependencies, ensures the
+repository directory exists, updates the service safely, and enables it.
+Keep the mutation API private behind Tailscale.
 
-Server setup also installs Cloudflare's `cloudflared` package and creates its
-systemd service when a tunnel token is supplied. The Cloudflare dashboard still
-must create the tunnel and hostname route; see `Docs/ServerManagement.md`.
+The server setup uses the existing Cloudflare R2 credentials and publishes
+incremental changes to the existing R2 bucket; no tunnel is required.

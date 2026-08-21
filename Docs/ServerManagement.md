@@ -8,32 +8,42 @@ repository under `/srv/storage/Storage/MattOSPackageRepo/` by default and expose
 authenticated API for the compatibility client in
 `GenericScripts/ManageMattOSRepository.py`.
 
-Initialize it once on the home server, either from the Server Manager's
-`MattOS repository setup` capability or directly:
+Initialize it once on the home server from the Server Manager's
+`MattOS repository setup` capability:
 
 ```bash
-sudo install -d -m 0755 /srv/storage/Storage/MattOSPackageRepo
-sudo python3 Tools/ManageMattOSRepositoryServer.py setup
+sudo python3 Tools/ServerManager.py
 ```
 
-The interactive Server Manager invokes the equivalent `setup` command. It
-creates the repository signing key and token, then displays the token once so
-it can be copied into the publisher clients. It does not start the API daemon
-inside the menu.
+Choose `MattOS repository setup`. It installs the required Debian, GPG, and
+R2 client packages, creates `/srv/storage/Storage/MattOSPackageRepo/` without
+deleting existing packages, installs/updates the systemd service, and enables
+it. Bitwarden is used only when the server needs credentials or the signing
+key; cached credentials are reused afterward.
 
-Run the service as a dedicated account, bind it to a private Tailscale or VPN
-address, and place the token in the client user's
-`~/.config/mattos-repository/token`. The built-in service serves the APT
-repository at `/repository/`; a reverse proxy can add HTTPS or a custom
-hostname. The API mutations remain token-protected; APT clients use the
-static repository URL.
+The API binds to the server's Tailscale IPv4 address when Tailscale is
+available. The compatibility client defaults to:
+
+```text
+http://hunglosvr:8790
+```
+
+This means existing projects need no repository URL setting. They only need
+the current compatible `ManageMattOSRepository.py` file and access to the
+tailnet. The server setup provisions the token for the setup user's normal
+client location. Other machines need the same token installed once in
+`~/.config/mattos-repository/token`; projects do not need separate settings.
+
+The built-in service serves the public repository locally as `/repository/`.
+Cloudflare R2 remains the public APT publication target, so normal APT users
+continue using `https://packages.mattsherfey.com`.
 
 The server manager supports `init`, `status`, `token`, `add`, `remove`,
 `list`, `verify`, and `serve`. Every mutation is serialized and publishes a
 new release directory atomically. The server owns the private signing key;
 clients use `export-key` to retrieve the public key.
 
-For a persistent service, use a dedicated account and a unit equivalent to:
+If a manual unit is ever needed, it should be equivalent to:
 
 ```ini
 [Unit]
@@ -45,31 +55,41 @@ User=mattos-repo
 WorkingDirectory=/opt/LinuxScripts
 Environment=MATTOS_REPOSITORY_ROOT=/srv/storage/Storage/MattOSPackageRepo
 Environment=MATTOS_REPOSITORY_TOKEN_FILE=/srv/storage/Storage/MattOSPackageRepo/api-token
-Environment=MATTOS_REPOSITORY_PUBLIC_URL=https://packages.example/repository
-ExecStart=/usr/bin/python3 /opt/LinuxScripts/Tools/ManageMattOSRepositoryServer.py serve --bind 127.0.0.1 --port 8790
+Environment=MATTOS_REPOSITORY_PUBLIC_URL=https://packages.mattsherfey.com
+ExecStart=/usr/bin/python3 /opt/LinuxScripts/Tools/ManageMattOSRepositoryServer.py serve --bind 100.x.y.z --port 8790
 Restart=on-failure
 
 [Install]
 WantedBy=multi-user.target
 ```
 
-The setup command installs `reprepro`, `gnupg`, and `dpkg-dev` automatically.
-The service account must own the repository state and token file. The built-in
-service serves the repository at `/repository/`; a reverse proxy can expose
-the API only through Tailscale/VPN and provide HTTPS, for example:
+The setup command owns the service configuration and updates only its own
+unit. It performs an initial synchronization from the existing Cloudflare R2
+repository. Later package operations update the persistent local repository
+and publish only changed R2 objects.
 
-```text
-/repository/  -> /srv/storage/Storage/MattOSPackageRepo/current/
-/repository-api/ -> http://127.0.0.1:8790/
+### Tailscale name
+
+The client is already configured for your existing Tailscale machine name,
+`hunglosvr`. Verify from another tailnet-connected client with:
+
+```bash
+ping hunglosvr
+curl http://hunglosvr:8790/v1/status
 ```
 
-Setup also installs `cloudflared` from Cloudflare's signed Debian package
-repository. Before running setup, create a remotely managed Cloudflare Tunnel
-and copy its connector token. The setup prompt accepts that token; it can also
-be supplied non-interactively with `MATTOS_CLOUDFLARE_TUNNEL_TOKEN`. When a
-token is available, setup creates and enables `cloudflared.service` using a
-protected token file. Without a token, setup still completes the local
-repository and service, and a later setup rerun will configure the tunnel.
+MagicDNS must be enabled in the tailnet DNS settings. If the short name does
+not resolve, use the server's full MagicDNS name (`hunglosvr.<tailnet>.ts.net`)
+in `/etc/mattos-repository/client.conf`:
+
+```bash
+sudo install -d -m 0755 /etc/mattos-repository
+printf '%s\n' 'SERVER_URL=http://hunglosvr.<tailnet>.ts.net:8790' | sudo tee /etc/mattos-repository/client.conf
+```
+
+If a different name is preferred, set `SERVER_URL=http://that-name:8790` in
+`/etc/mattos-repository/client.conf`; this is one machine-wide setting, not a
+per-project setting.
 
 Run the Linux-only server administration interface with:
 

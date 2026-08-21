@@ -12,9 +12,11 @@ from __future__ import annotations
 import argparse
 import fcntl
 import getpass
+import importlib.util
 import json
 import mimetypes
 import os
+import pwd
 import re
 import secrets
 import shutil
@@ -22,8 +24,6 @@ import subprocess
 import sys
 import tempfile
 import time
-import urllib.error
-import urllib.request
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -37,13 +37,11 @@ DEFAULT_COMPONENT = "main"
 DEFAULT_ARCHITECTURES = ("amd64",)
 DEFAULT_BIND = "127.0.0.1"
 DEFAULT_PORT = 8790
+DEFAULT_R2_ITEM = "MattOS R2 Repository Publisher"
+DEFAULT_GPG_ITEM = "MattOS Repository Signing Key"
+DEFAULT_BUCKET = "matt-apt-repo"
 SERVICE_NAME = "mattos-repository.service"
 SERVICE_PATH = Path("/etc/systemd/system") / SERVICE_NAME
-CLOUDFLARED_SERVICE_NAME = "cloudflared.service"
-CLOUDFLARED_SERVICE_PATH = Path("/etc/systemd/system") / CLOUDFLARED_SERVICE_NAME
-CLOUDFLARE_KEY_URL = "https://pkg.cloudflare.com/cloudflare-main.gpg"
-CLOUDFLARE_KEY_PATH = Path("/usr/share/keyrings/cloudflare-main.gpg")
-CLOUDFLARE_SOURCE_PATH = Path("/etc/apt/sources.list.d/cloudflared.list")
 
 
 class RepositoryError(RuntimeError):
@@ -81,83 +79,28 @@ def service_user() -> str:
     return os.environ.get("MATTOS_REPOSITORY_SERVICE_USER") or os.environ.get("SUDO_USER") or getpass.getuser()
 
 
+def provision_client_token(token: str, user: str) -> None:
+    account = pwd.getpwnam(user)
+    directory = Path(account.pw_dir) / ".config" / "mattos-repository"
+    path = directory / "token"
+    directory.mkdir(parents=True, exist_ok=True)
+    path.write_text(token + "\n", encoding="utf-8")
+    os.chown(directory, account.pw_uid, account.pw_gid)
+    os.chown(path, account.pw_uid, account.pw_gid)
+    os.chmod(directory, 0o700)
+    os.chmod(path, 0o600)
+
+
 def install_dependencies() -> None:
-    required = ("reprepro", "gpg", "dpkg-deb")
-    missing = [name for name in required if shutil.which(name) is None]
+    required = ("reprepro", "gpg", "dpkg-deb", "boto3")
+    missing = [name for name in required if (importlib.util.find_spec("boto3") is None if name == "boto3" else shutil.which(name) is None)]
     if not missing:
         return
     if shutil.which("apt-get") is None:
         raise RepositoryError("Missing repository dependencies and apt-get is unavailable: " + ", ".join(missing))
-    packages = ["reprepro" if name == "reprepro" else "gnupg" if name == "gpg" else "dpkg-dev" for name in missing]
+    packages = ["reprepro" if name == "reprepro" else "gnupg" if name == "gpg" else "dpkg-dev" if name == "dpkg-deb" else "python3-boto3" for name in missing]
     privileged(["apt-get", "update"])
     privileged(["apt-get", "install", "-y", *sorted(set(packages))])
-
-
-def install_cloudflared() -> None:
-    """Install cloudflared from Cloudflare's signed Debian repository."""
-    if shutil.which("cloudflared"):
-        return
-    if shutil.which("apt-get") is None:
-        raise RepositoryError("cloudflared is missing and apt-get is unavailable")
-    try:
-        with urllib.request.urlopen(CLOUDFLARE_KEY_URL, timeout=30) as response:
-            key = response.read()
-    except (urllib.error.URLError, urllib.error.HTTPError) as exc:
-        raise RepositoryError("Could not download Cloudflare's package signing key") from exc
-    if b"BEGIN PGP PUBLIC KEY BLOCK" not in key:
-        raise RepositoryError("Cloudflare package signing key response was invalid")
-    with tempfile.NamedTemporaryFile("wb", prefix="cloudflare-main-", suffix=".gpg", delete=False) as key_file:
-        key_file.write(key)
-        key_source = Path(key_file.name)
-    with tempfile.NamedTemporaryFile("w", encoding="utf-8", prefix="cloudflared-", suffix=".list", delete=False) as source_file:
-        source_file.write(f"deb [signed-by={CLOUDFLARE_KEY_PATH}] https://pkg.cloudflare.com/cloudflared any main\n")
-        source_source = Path(source_file.name)
-    try:
-        privileged(["install", "-d", "-m", "0755", str(CLOUDFLARE_KEY_PATH.parent)])
-        privileged(["install", "-m", "0644", str(key_source), str(CLOUDFLARE_KEY_PATH)])
-        privileged(["install", "-m", "0644", str(source_source), str(CLOUDFLARE_SOURCE_PATH)])
-    finally:
-        key_source.unlink(missing_ok=True)
-        source_source.unlink(missing_ok=True)
-    privileged(["apt-get", "update"])
-    privileged(["apt-get", "install", "-y", "cloudflared"])
-
-
-def cloudflared_token_path(config: "ServerConfig") -> Path:
-    return config.root / "cloudflared-token"
-
-
-def install_cloudflared_service(config: "ServerConfig") -> bool:
-    """Install the Cloudflare connector service when a tunnel token exists."""
-    token = os.environ.get("MATTOS_CLOUDFLARE_TUNNEL_TOKEN", "").strip()
-    if not token and sys.stdin.isatty():
-        try:
-            token = getpass.getpass("Cloudflare Tunnel token (press Enter to configure later): ").strip()
-        except (EOFError, KeyboardInterrupt):
-            token = ""
-    token_path = Path(os.environ.get("MATTOS_CLOUDFLARE_TUNNEL_TOKEN_FILE", str(cloudflared_token_path(config)))).expanduser()
-    if token:
-        token_path.parent.mkdir(parents=True, exist_ok=True)
-        token_path.write_text(token + "\n", encoding="utf-8")
-        token_path.chmod(0o600)
-    if not token_path.is_file() or not token_path.read_text(encoding="utf-8").strip():
-        return False
-    binary = shutil.which("cloudflared") or "/usr/bin/cloudflared"
-    service = "\n".join((
-        "[Unit]", "Description=Cloudflare Tunnel for MattOS repository", "After=network-online.target mattos-repository.service", "Wants=network-online.target mattos-repository.service", "",
-        "[Service]", "Type=notify", f"ExecStart={binary} tunnel run --token-file {token_path}", "Restart=on-failure", "RestartSec=5", "",
-        "[Install]", "WantedBy=multi-user.target", "",
-    ))
-    with tempfile.NamedTemporaryFile("w", encoding="utf-8", prefix="cloudflared-", suffix=".service", delete=False) as service_file:
-        service_file.write(service)
-        source = Path(service_file.name)
-    try:
-        privileged(["install", "-o", "root", "-g", "root", "-m", "0644", str(source), str(CLOUDFLARED_SERVICE_PATH)])
-    finally:
-        source.unlink(missing_ok=True)
-    privileged(["systemctl", "daemon-reload"])
-    privileged(["systemctl", "enable", "--now", CLOUDFLARED_SERVICE_NAME])
-    return True
 
 
 def ensure_tree_permissions(root: Path, user: str) -> None:
@@ -180,12 +123,17 @@ def ensure_tree_permissions(root: Path, user: str) -> None:
 
 def service_definition(config: "ServerConfig", user: str) -> str:
     script = Path(__file__).resolve().parents[2] / "Tools" / "ManageMattOSRepositoryServer.py"
+    bind = os.environ.get("MATTOS_REPOSITORY_BIND")
+    if not bind and shutil.which("tailscale"):
+        result = subprocess.run(["tailscale", "ip", "-4"], text=True, capture_output=True, check=False)
+        bind = result.stdout.strip().splitlines()[0] if result.returncode == 0 and result.stdout.strip() else None
+    bind = bind or "127.0.0.1"
     return "\n".join((
         "[Unit]", "Description=MattOS local Debian repository API", "After=network-online.target", "Wants=network-online.target", "",
         "[Service]", "Type=simple", f"User={user}", f"WorkingDirectory={script.parent.parent}",
         f"Environment=MATTOS_REPOSITORY_ROOT={config.root}", f"Environment=MATTOS_REPOSITORY_TOKEN_FILE={config.token_file}",
         f"Environment=MATTOS_REPOSITORY_PUBLIC_URL={config.public_url}",
-        f"ExecStart=/usr/bin/python3 {script} serve --bind {os.environ.get('MATTOS_REPOSITORY_BIND', DEFAULT_BIND)} --port {os.environ.get('MATTOS_REPOSITORY_PORT', str(DEFAULT_PORT))}",
+        f"ExecStart=/usr/bin/python3 {script} serve --bind {bind} --port {os.environ.get('MATTOS_REPOSITORY_PORT', str(DEFAULT_PORT))}",
         "Restart=on-failure", "RestartSec=5", "", "[Install]", "WantedBy=multi-user.target", "",
     ))
 
@@ -229,9 +177,14 @@ class ServerConfig:
     suite: str = DEFAULT_SUITE
     component: str = DEFAULT_COMPONENT
     architectures: tuple[str, ...] = DEFAULT_ARCHITECTURES
-    public_url: str = "http://127.0.0.1:8790/repository"
+    public_url: str = "https://packages.mattsherfey.com"
     token_file: Path = DEFAULT_ROOT / "api-token"
     private_key_file: Path | None = None
+    r2_item: str = DEFAULT_R2_ITEM
+    gpg_item: str = DEFAULT_GPG_ITEM
+    bucket: str = DEFAULT_BUCKET
+    endpoint: str = ""
+    r2_enabled: bool = True
 
     @classmethod
     def from_env(cls) -> "ServerConfig":
@@ -242,9 +195,13 @@ class ServerConfig:
             suite=os.environ.get("MATTOS_REPOSITORY_SUITE", DEFAULT_SUITE),
             component=os.environ.get("MATTOS_REPOSITORY_COMPONENT", DEFAULT_COMPONENT),
             architectures=validate_architectures(os.environ.get("MATTOS_REPOSITORY_ARCHITECTURES", "amd64")),
-            public_url=os.environ.get("MATTOS_REPOSITORY_PUBLIC_URL", "http://127.0.0.1:8790/repository").rstrip("/"),
+            public_url=os.environ.get("MATTOS_REPOSITORY_PUBLIC_URL", "https://packages.mattsherfey.com").rstrip("/"),
             token_file=Path(os.environ.get("MATTOS_REPOSITORY_TOKEN_FILE", str(root / "api-token"))).expanduser(),
             private_key_file=Path(key).expanduser() if key else None,
+            r2_item=os.environ.get("MATTOS_R2_ITEM", DEFAULT_R2_ITEM),
+            gpg_item=os.environ.get("MATTOS_GPG_ITEM", DEFAULT_GPG_ITEM),
+            bucket=os.environ.get("MATTOS_R2_BUCKET", DEFAULT_BUCKET),
+            endpoint=os.environ.get("MATTOS_R2_ENDPOINT", ""),
         )
 
 
@@ -297,6 +254,22 @@ class RepositoryManager:
 
     def _key_material(self) -> str:
         path = self.config.private_key_file or (self.root / "private-key.asc")
+        if not path.is_file():
+            if not self.config.r2_enabled:
+                raise RepositoryError(f"Signing key is missing: {path}")
+            try:
+                from bitwarden import BitwardenClient
+                password_file = Path(os.environ.get("MATTOS_BW_PASSWORD_FILE", str(Path.home() / "Documents/Repos/LinuxScripts/.bw_master_password"))).expanduser()
+                bw = BitwardenClient(password_file=password_file, error_type=RepositoryError)
+                item = bw.item(self.config.gpg_item)
+                custom = {str(f["name"]): str(f["value"]) for f in item.get("fields", []) or [] if isinstance(f, dict) and f.get("name") and f.get("value") is not None}
+                key = custom.get("PRIVATE_KEY") or str(item.get("notes") or "")
+                if "BEGIN PGP PRIVATE KEY BLOCK" in key:
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    path.write_text(key, encoding="utf-8")
+                    path.chmod(0o600)
+            except Exception as exc:
+                raise RepositoryError(f"Signing key is missing: {path}; could not retrieve Bitwarden key") from exc
         if not path.is_file():
             raise RepositoryError(f"Signing key is missing: {path}; run the server init command")
         return path.read_text(encoding="utf-8")
@@ -365,6 +338,37 @@ class RepositoryManager:
         run(["reprepro", "--basedir", str(stage), "export"], env=env)
         shutil.rmtree(gpg_home, ignore_errors=True)
 
+    def _r2(self):
+        from bitwarden import BitwardenClient
+        from server.r2_repository import R2Publisher
+        password_file = Path(os.environ.get("MATTOS_BW_PASSWORD_FILE", str(Path.home() / "Documents/Repos/LinuxScripts/.bw_master_password"))).expanduser()
+        bw = BitwardenClient(password_file=password_file, error_type=RepositoryError)
+        return R2Publisher(self.config, bw)
+
+    def synchronize_r2(self) -> None:
+        """Use R2 as the publication target while retaining local state."""
+        if not self.config.r2_enabled:
+            return
+        r2 = self._r2()
+        owner = r2.lock()
+        try:
+            keys = r2.keys()
+            active = self._active()
+            if keys and (not active or not any((active / "pool").rglob("*.deb"))):
+                stage = Path(tempfile.mkdtemp(prefix="mattos-r2-sync-", dir=self.releases))
+                try:
+                    for key in sorted(keys):
+                        r2.download(key, stage / key)
+                    self._commit(stage)
+                    active = self._active()
+                except Exception:
+                    shutil.rmtree(stage, ignore_errors=True)
+                    raise
+            if active:
+                r2.publish(active, keys)
+        finally:
+            r2.unlock(owner)
+
     def init(self) -> None:
         with self._lock() as handle:
             try:
@@ -373,6 +377,11 @@ class RepositoryManager:
                     return
                 self.ensure_layout()
                 key_path = self.config.private_key_file or (self.root / "private-key.asc")
+                if not key_path.is_file():
+                    try:
+                        self._key_material()
+                    except RepositoryError:
+                        pass
                 if not key_path.is_file():
                     key_path.parent.mkdir(parents=True, exist_ok=True)
                     with tempfile.TemporaryDirectory(prefix="mattos-gpg-") as temp:
@@ -387,6 +396,7 @@ class RepositoryManager:
                 try:
                     self._build(stage, [])
                     self._commit(stage)
+                    self.synchronize_r2()
                 except Exception:
                     shutil.rmtree(stage, ignore_errors=True)
                     raise
@@ -435,6 +445,7 @@ class RepositoryManager:
                 self._build(stage, [incoming])
                 incoming.unlink(missing_ok=True)
                 self._commit(stage)
+                self.synchronize_r2()
             except Exception:
                 shutil.rmtree(stage, ignore_errors=True)
                 raise
@@ -459,6 +470,7 @@ class RepositoryManager:
             try:
                 self._build(stage, packages)
                 self._commit(stage)
+                self.synchronize_r2()
             except Exception:
                 shutil.rmtree(stage, ignore_errors=True)
                 raise
@@ -500,7 +512,6 @@ class RepositoryManager:
 def setup_server(config: ServerConfig) -> tuple[str, bool]:
     """Install dependencies and reconcile the server installation safely."""
     install_dependencies()
-    install_cloudflared()
     user = service_user()
     root = config.root
     privileged(["install", "-d", "-o", user, "-g", user, "-m", "0755", str(root)])
@@ -512,8 +523,10 @@ def setup_server(config: ServerConfig) -> tuple[str, bool]:
     manager.reconcile_configuration()
     ensure_tree_permissions(root, user)
     install_service(config, user)
-    tunnel_configured = install_cloudflared_service(config)
-    return manager.ensure_token(), tunnel_configured
+    manager.synchronize_r2()
+    token = manager.ensure_token()
+    provision_client_token(token, user)
+    return token, False
 
 
 class RepositoryHandler(BaseHTTPRequestHandler):
@@ -651,10 +664,7 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps(manager.status(), indent=2, sort_keys=True))
             print("API token (store it in the client token file):")
             print(token)
-            if tunnel_configured:
-                print("Cloudflare Tunnel service: configured and running")
-            else:
-                print("Cloudflare Tunnel: cloudflared installed; tunnel token still needs to be supplied")
+            print("Cloudflare R2 synchronization: configured and completed")
         elif args.command == "status": print(json.dumps(manager.status(), indent=2, sort_keys=True))
         elif args.command == "verify": manager.verify(); print("Repository verification passed.")
         elif args.command == "list":

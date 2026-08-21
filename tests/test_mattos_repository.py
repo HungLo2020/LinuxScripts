@@ -21,7 +21,7 @@ class MattOSRepositoryTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary) / "repository"
             token = Path(temporary) / "token"
-            config = ServerConfig(root=root, token_file=token)
+            config = ServerConfig(root=root, token_file=token, r2_enabled=False)
             manager = RepositoryManager(config)
 
             manager.init()
