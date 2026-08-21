@@ -11,7 +11,9 @@ from __future__ import annotations
 
 import argparse
 import fcntl
+import getpass
 import json
+import mimetypes
 import os
 import re
 import secrets
@@ -20,6 +22,8 @@ import subprocess
 import sys
 import tempfile
 import time
+import urllib.error
+import urllib.request
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -27,16 +31,178 @@ from typing import Any
 from urllib.parse import urlparse
 
 
-DEFAULT_ROOT = Path("/var/lib/mattos-repository")
+DEFAULT_ROOT = Path("/srv/storage/Storage/MattOSPackageRepo")
 DEFAULT_SUITE = "trixie"
 DEFAULT_COMPONENT = "main"
 DEFAULT_ARCHITECTURES = ("amd64",)
 DEFAULT_BIND = "127.0.0.1"
 DEFAULT_PORT = 8790
+SERVICE_NAME = "mattos-repository.service"
+SERVICE_PATH = Path("/etc/systemd/system") / SERVICE_NAME
+CLOUDFLARED_SERVICE_NAME = "cloudflared.service"
+CLOUDFLARED_SERVICE_PATH = Path("/etc/systemd/system") / CLOUDFLARED_SERVICE_NAME
+CLOUDFLARE_KEY_URL = "https://pkg.cloudflare.com/cloudflare-main.gpg"
+CLOUDFLARE_KEY_PATH = Path("/usr/share/keyrings/cloudflare-main.gpg")
+CLOUDFLARE_SOURCE_PATH = Path("/etc/apt/sources.list.d/cloudflared.list")
 
 
 class RepositoryError(RuntimeError):
     """An expected repository operation failure."""
+
+
+def run_system(command: list[str], *, env: dict[str, str] | None = None) -> str:
+    """Run a host-management command and return its output."""
+    try:
+        result = subprocess.run(command, env=env, text=True, capture_output=True, check=False)
+    except FileNotFoundError as exc:
+        raise RepositoryError(f"Required command is not installed: {command[0]}") from exc
+    if result.returncode:
+        detail = (result.stderr or result.stdout).strip()
+        raise RepositoryError(f"Command failed ({result.returncode}): {command[0]}" + (f"\n{detail}" if detail else ""))
+    return result.stdout
+
+
+def privileged(command: list[str], *, input_text: str | None = None) -> None:
+    """Run a root operation directly or through sudo."""
+    prefix = [] if os.geteuid() == 0 else ["sudo"]
+    if prefix and shutil.which("sudo") is None:
+        raise RepositoryError("sudo is required for server setup")
+    try:
+        result = subprocess.run(prefix + command, input=input_text, text=True, capture_output=True, check=False)
+    except FileNotFoundError as exc:
+        raise RepositoryError(f"Required command is not installed: {command[0]}") from exc
+    if result.returncode:
+        detail = (result.stderr or result.stdout).strip()
+        raise RepositoryError(f"Command failed ({result.returncode}): {command[0]}" + (f"\n{detail}" if detail else ""))
+
+
+def service_user() -> str:
+    """Choose the account that invoked setup, including sudo invocations."""
+    return os.environ.get("MATTOS_REPOSITORY_SERVICE_USER") or os.environ.get("SUDO_USER") or getpass.getuser()
+
+
+def install_dependencies() -> None:
+    required = ("reprepro", "gpg", "dpkg-deb")
+    missing = [name for name in required if shutil.which(name) is None]
+    if not missing:
+        return
+    if shutil.which("apt-get") is None:
+        raise RepositoryError("Missing repository dependencies and apt-get is unavailable: " + ", ".join(missing))
+    packages = ["reprepro" if name == "reprepro" else "gnupg" if name == "gpg" else "dpkg-dev" for name in missing]
+    privileged(["apt-get", "update"])
+    privileged(["apt-get", "install", "-y", *sorted(set(packages))])
+
+
+def install_cloudflared() -> None:
+    """Install cloudflared from Cloudflare's signed Debian repository."""
+    if shutil.which("cloudflared"):
+        return
+    if shutil.which("apt-get") is None:
+        raise RepositoryError("cloudflared is missing and apt-get is unavailable")
+    try:
+        with urllib.request.urlopen(CLOUDFLARE_KEY_URL, timeout=30) as response:
+            key = response.read()
+    except (urllib.error.URLError, urllib.error.HTTPError) as exc:
+        raise RepositoryError("Could not download Cloudflare's package signing key") from exc
+    if b"BEGIN PGP PUBLIC KEY BLOCK" not in key:
+        raise RepositoryError("Cloudflare package signing key response was invalid")
+    with tempfile.NamedTemporaryFile("wb", prefix="cloudflare-main-", suffix=".gpg", delete=False) as key_file:
+        key_file.write(key)
+        key_source = Path(key_file.name)
+    with tempfile.NamedTemporaryFile("w", encoding="utf-8", prefix="cloudflared-", suffix=".list", delete=False) as source_file:
+        source_file.write(f"deb [signed-by={CLOUDFLARE_KEY_PATH}] https://pkg.cloudflare.com/cloudflared any main\n")
+        source_source = Path(source_file.name)
+    try:
+        privileged(["install", "-d", "-m", "0755", str(CLOUDFLARE_KEY_PATH.parent)])
+        privileged(["install", "-m", "0644", str(key_source), str(CLOUDFLARE_KEY_PATH)])
+        privileged(["install", "-m", "0644", str(source_source), str(CLOUDFLARE_SOURCE_PATH)])
+    finally:
+        key_source.unlink(missing_ok=True)
+        source_source.unlink(missing_ok=True)
+    privileged(["apt-get", "update"])
+    privileged(["apt-get", "install", "-y", "cloudflared"])
+
+
+def cloudflared_token_path(config: "ServerConfig") -> Path:
+    return config.root / "cloudflared-token"
+
+
+def install_cloudflared_service(config: "ServerConfig") -> bool:
+    """Install the Cloudflare connector service when a tunnel token exists."""
+    token = os.environ.get("MATTOS_CLOUDFLARE_TUNNEL_TOKEN", "").strip()
+    if not token and sys.stdin.isatty():
+        try:
+            token = getpass.getpass("Cloudflare Tunnel token (press Enter to configure later): ").strip()
+        except (EOFError, KeyboardInterrupt):
+            token = ""
+    token_path = Path(os.environ.get("MATTOS_CLOUDFLARE_TUNNEL_TOKEN_FILE", str(cloudflared_token_path(config)))).expanduser()
+    if token:
+        token_path.parent.mkdir(parents=True, exist_ok=True)
+        token_path.write_text(token + "\n", encoding="utf-8")
+        token_path.chmod(0o600)
+    if not token_path.is_file() or not token_path.read_text(encoding="utf-8").strip():
+        return False
+    binary = shutil.which("cloudflared") or "/usr/bin/cloudflared"
+    service = "\n".join((
+        "[Unit]", "Description=Cloudflare Tunnel for MattOS repository", "After=network-online.target mattos-repository.service", "Wants=network-online.target mattos-repository.service", "",
+        "[Service]", "Type=notify", f"ExecStart={binary} tunnel run --token-file {token_path}", "Restart=on-failure", "RestartSec=5", "",
+        "[Install]", "WantedBy=multi-user.target", "",
+    ))
+    with tempfile.NamedTemporaryFile("w", encoding="utf-8", prefix="cloudflared-", suffix=".service", delete=False) as service_file:
+        service_file.write(service)
+        source = Path(service_file.name)
+    try:
+        privileged(["install", "-o", "root", "-g", "root", "-m", "0644", str(source), str(CLOUDFLARED_SERVICE_PATH)])
+    finally:
+        source.unlink(missing_ok=True)
+    privileged(["systemctl", "daemon-reload"])
+    privileged(["systemctl", "enable", "--now", CLOUDFLARED_SERVICE_NAME])
+    return True
+
+
+def ensure_tree_permissions(root: Path, user: str) -> None:
+    """Keep repository contents service-readable without touching package data."""
+    try:
+        import pwd
+        uid = pwd.getpwnam(user).pw_uid
+        gid = pwd.getpwnam(user).pw_gid
+    except KeyError as exc:
+        raise RepositoryError(f"Repository service user does not exist: {user}") from exc
+    for path in sorted(root.rglob("*")):
+        try:
+            os.chown(path, uid, gid)
+            os.chmod(path, 0o755 if path.is_dir() else (0o600 if path.name in {"private-key.asc", "token"} else 0o644))
+        except PermissionError as exc:
+            raise RepositoryError(f"Could not set repository permissions on {path}") from exc
+    os.chown(root, uid, gid)
+    os.chmod(root, 0o755)
+
+
+def service_definition(config: "ServerConfig", user: str) -> str:
+    script = Path(__file__).resolve().parents[2] / "Tools" / "ManageMattOSRepositoryServer.py"
+    return "\n".join((
+        "[Unit]", "Description=MattOS local Debian repository API", "After=network-online.target", "Wants=network-online.target", "",
+        "[Service]", "Type=simple", f"User={user}", f"WorkingDirectory={script.parent.parent}",
+        f"Environment=MATTOS_REPOSITORY_ROOT={config.root}", f"Environment=MATTOS_REPOSITORY_TOKEN_FILE={config.token_file}",
+        f"Environment=MATTOS_REPOSITORY_PUBLIC_URL={config.public_url}",
+        f"ExecStart=/usr/bin/python3 {script} serve --bind {os.environ.get('MATTOS_REPOSITORY_BIND', DEFAULT_BIND)} --port {os.environ.get('MATTOS_REPOSITORY_PORT', str(DEFAULT_PORT))}",
+        "Restart=on-failure", "RestartSec=5", "", "[Install]", "WantedBy=multi-user.target", "",
+    ))
+
+
+def install_service(config: "ServerConfig", user: str) -> None:
+    """Install and enable the generated service, updating only its own unit."""
+    with tempfile.NamedTemporaryFile("w", encoding="utf-8", prefix="mattos-repository-", suffix=".service", delete=False) as temporary:
+        temporary.write(service_definition(config, user))
+        source = Path(temporary.name)
+    try:
+        privileged(["install", "-o", "root", "-g", "root", "-m", "0644", str(source), str(SERVICE_PATH)])
+    finally:
+        source.unlink(missing_ok=True)
+    if shutil.which("systemctl") is None:
+        raise RepositoryError("systemctl is required to install the MattOS repository service")
+    privileged(["systemctl", "daemon-reload"])
+    privileged(["systemctl", "enable", "--now", SERVICE_NAME])
 
 
 def run(command: list[str], *, cwd: Path | None = None, env: dict[str, str] | None = None) -> str:
@@ -63,8 +229,8 @@ class ServerConfig:
     suite: str = DEFAULT_SUITE
     component: str = DEFAULT_COMPONENT
     architectures: tuple[str, ...] = DEFAULT_ARCHITECTURES
-    public_url: str = "http://127.0.0.1/repository"
-    token_file: Path = Path("/etc/mattos-repository/token")
+    public_url: str = "http://127.0.0.1:8790/repository"
+    token_file: Path = DEFAULT_ROOT / "api-token"
     private_key_file: Path | None = None
 
     @classmethod
@@ -76,8 +242,8 @@ class ServerConfig:
             suite=os.environ.get("MATTOS_REPOSITORY_SUITE", DEFAULT_SUITE),
             component=os.environ.get("MATTOS_REPOSITORY_COMPONENT", DEFAULT_COMPONENT),
             architectures=validate_architectures(os.environ.get("MATTOS_REPOSITORY_ARCHITECTURES", "amd64")),
-            public_url=os.environ.get("MATTOS_REPOSITORY_PUBLIC_URL", "http://127.0.0.1/repository").rstrip("/"),
-            token_file=Path(os.environ.get("MATTOS_REPOSITORY_TOKEN_FILE", "/etc/mattos-repository/token")).expanduser(),
+            public_url=os.environ.get("MATTOS_REPOSITORY_PUBLIC_URL", "http://127.0.0.1:8790/repository").rstrip("/"),
+            token_file=Path(os.environ.get("MATTOS_REPOSITORY_TOKEN_FILE", str(root / "api-token"))).expanduser(),
             private_key_file=Path(key).expanduser() if key else None,
         )
 
@@ -227,6 +393,32 @@ class RepositoryManager:
             finally:
                 handle.close()
 
+    def reconcile_configuration(self) -> None:
+        """Regenerate metadata only when repository configuration changed."""
+        active = self._active()
+        if not active:
+            return
+        distributions = active / "conf" / "distributions"
+        current = distributions.read_text(encoding="utf-8") if distributions.is_file() else ""
+        expected = (
+            f"Suite: {self.config.suite}\n",
+            f"Components: {self.config.component}\n",
+            f"Architectures: {' '.join(self.config.architectures)}\n",
+        )
+        if all(line in current for line in expected):
+            return
+        with self._lock() as handle:
+            stage = Path(tempfile.mkdtemp(prefix="mattos-repository-", dir=self.releases))
+            try:
+                self._stage_from_active(stage)
+                self._build(stage, sorted(active.rglob("*.deb")))
+                self._commit(stage)
+            except Exception:
+                shutil.rmtree(stage, ignore_errors=True)
+                raise
+            finally:
+                handle.close()
+
     def add(self, package: Path) -> dict[str, str]:
         package = package.resolve()
         if not package.is_file() or package.suffix != ".deb":
@@ -305,6 +497,25 @@ class RepositoryManager:
         run(["reprepro", "--basedir", str(active), "check", self.config.suite])
 
 
+def setup_server(config: ServerConfig) -> tuple[str, bool]:
+    """Install dependencies and reconcile the server installation safely."""
+    install_dependencies()
+    install_cloudflared()
+    user = service_user()
+    root = config.root
+    privileged(["install", "-d", "-o", user, "-g", user, "-m", "0755", str(root)])
+    privileged(["install", "-d", "-o", user, "-g", user, "-m", "0755", str(config.token_file.parent)])
+    if os.geteuid() != 0 and root.exists():
+        privileged(["chown", "-R", user, str(root)])
+    manager = RepositoryManager(config)
+    manager.init()
+    manager.reconcile_configuration()
+    ensure_tree_permissions(root, user)
+    install_service(config, user)
+    tunnel_configured = install_cloudflared_service(config)
+    return manager.ensure_token(), tunnel_configured
+
+
 class RepositoryHandler(BaseHTTPRequestHandler):
     server_version = "MattOSRepository/1.0"
 
@@ -319,14 +530,53 @@ class RepositoryHandler(BaseHTTPRequestHandler):
         supplied = self.headers.get("Authorization", "")
         return secrets.compare_digest(supplied.removeprefix("Bearer ").strip(), expected)
 
-    def _send(self, status: int, payload: Any, content_type: str = "application/json") -> None:
+    def _send(self, status: int, payload: Any, content_type: str = "application/json", cache_control: str | None = None) -> None:
         data = payload if isinstance(payload, bytes) else (json.dumps(payload).encode() if content_type == "application/json" else str(payload).encode())
-        self.send_response(status); self.send_header("Content-Type", content_type); self.send_header("Content-Length", str(len(data))); self.end_headers(); self.wfile.write(data)
+        self.send_response(status); self.send_header("Content-Type", content_type); self.send_header("Content-Length", str(len(data)))
+        if cache_control:
+            self.send_header("Cache-Control", cache_control)
+        self.end_headers(); self.wfile.write(data)
 
     def _error(self, status: int, message: str) -> None:
         self._send(status, {"error": message})
 
+    def _serve_repository_file(self, path: str) -> bool:
+        """Serve only public dists/pool files from the active release."""
+        prefix = "/repository/"
+        if path == "/repository":
+            self.send_response(301)
+            self.send_header("Location", "/repository/")
+            self.end_headers()
+            return True
+        if not path.startswith(prefix):
+            return False
+        relative = path.removeprefix(prefix)
+        if not relative.startswith(("dists/", "pool/")):
+            self._error(404, "repository file not found")
+            return True
+        active = self.manager._active()
+        if not active:
+            self._error(404, "repository is not initialized")
+            return True
+        root = active.resolve()
+        target = (root / relative).resolve()
+        try:
+            target.relative_to(root)
+        except ValueError:
+            self._error(404, "repository file not found")
+            return True
+        if not target.is_file():
+            self._error(404, "repository file not found")
+            return True
+        data = target.read_bytes()
+        content_type = mimetypes.guess_type(target.name)[0] or "application/octet-stream"
+        cache_control = "public, max-age=31536000, immutable" if "/pool/" in path and target.suffix == ".deb" else "no-cache, max-age=0, must-revalidate"
+        self._send(200, data, content_type, cache_control)
+        return True
+
     def do_GET(self) -> None:
+        if self._serve_repository_file(urlparse(self.path).path):
+            return
         if not self._authorized(): return self._error(401, "authentication required")
         path = urlparse(self.path).path
         try:
@@ -380,7 +630,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Manage the local MattOS Debian repository")
     parser.add_argument("--root", type=Path)
     sub = parser.add_subparsers(dest="command", required=True)
-    sub.add_parser("init"); sub.add_parser("status"); sub.add_parser("verify"); sub.add_parser("list")
+    sub.add_parser("init"); sub.add_parser("setup"); sub.add_parser("status"); sub.add_parser("verify"); sub.add_parser("list")
     add = sub.add_parser("add"); add.add_argument("package", type=Path)
     remove = sub.add_parser("remove"); remove.add_argument("name"); remove.add_argument("--version")
     api = sub.add_parser("serve"); api.add_argument("--bind", default=os.environ.get("MATTOS_REPOSITORY_BIND", DEFAULT_BIND)); api.add_argument("--port", type=int, default=int(os.environ.get("MATTOS_REPOSITORY_PORT", str(DEFAULT_PORT))))
@@ -396,6 +646,15 @@ def main(argv: list[str] | None = None) -> int:
             serve(config, args.bind, args.port)
         elif args.command == "token": print(manager.ensure_token())
         elif args.command == "init": manager.init(); print(json.dumps(manager.status(), indent=2, sort_keys=True))
+        elif args.command == "setup":
+            token, tunnel_configured = setup_server(config)
+            print(json.dumps(manager.status(), indent=2, sort_keys=True))
+            print("API token (store it in the client token file):")
+            print(token)
+            if tunnel_configured:
+                print("Cloudflare Tunnel service: configured and running")
+            else:
+                print("Cloudflare Tunnel: cloudflared installed; tunnel token still needs to be supplied")
         elif args.command == "status": print(json.dumps(manager.status(), indent=2, sort_keys=True))
         elif args.command == "verify": manager.verify(); print("Repository verification passed.")
         elif args.command == "list":

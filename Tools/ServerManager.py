@@ -30,6 +30,7 @@ from host import detect_host
 from server.btrfs_snapshots import main as btrfs_main
 from server.restic_backups import main as restic_main
 from server.zip_backups import main as zip_backup_main
+from server.mattos_repository import main as mattos_repository_main
 from containers.run_uptime_kuma import main as uptime_kuma_main
 
 
@@ -72,6 +73,12 @@ def uptime_kuma_action() -> int:
     return uptime_kuma_main([])
 
 
+def mattos_repository_action() -> int:
+    """Initialize the local MattOS repository and provision its API token."""
+
+    return mattos_repository_main(["setup"])
+
+
 def capabilities() -> tuple[tuple[str, str, Callable[[], int]], ...]:
     """Return modular server capabilities for the interactive menu."""
 
@@ -81,6 +88,7 @@ def capabilities() -> tuple[tuple[str, str, Callable[[], int]], ...]:
         ("Restic backup manager", "Configure, run, restore, and schedule local Restic backup jobs", restic_backup_action),
         ("ZIP backup manager", "Configure, archive, retain, and schedule local ZIP backup jobs", zip_backup_action),
         ("Uptime Kuma", "Install, start, stop, or remove the Uptime Kuma monitoring container", uptime_kuma_action),
+        ("MattOS repository setup", "Initialize the local signed Debian repository and display its API token", mattos_repository_action),
     )
 
 

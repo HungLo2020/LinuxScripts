@@ -27,7 +27,7 @@ if str(SOURCE_DIRECTORY) not in sys.path:
     sys.path.insert(0, str(SOURCE_DIRECTORY))
 
 DEFAULT_SERVER_URL = "http://127.0.0.1:8790"
-DEFAULT_PUBLIC_URL = "http://127.0.0.1/repository"
+DEFAULT_PUBLIC_URL = "http://127.0.0.1:8790/repository"
 DEFAULT_R2_ITEM = "Deprecated: local server backend"
 DEFAULT_GPG_ITEM = "Deprecated: signing key is server-owned"
 DEFAULT_BUCKET = ""

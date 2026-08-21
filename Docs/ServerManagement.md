@@ -4,24 +4,29 @@
 
 The home-server repository is managed by
 `Tools/ManageMattOSRepositoryServer.py`. It stores the persistent signed
-repository under `/var/lib/mattos-repository` by default and exposes a small
+repository under `/srv/storage/Storage/MattOSPackageRepo/` by default and exposes a small
 authenticated API for the compatibility client in
 `GenericScripts/ManageMattOSRepository.py`.
 
-Initialize it once on the home server:
+Initialize it once on the home server, either from the Server Manager's
+`MattOS repository setup` capability or directly:
 
 ```bash
-sudo install -d -m 0750 /var/lib/mattos-repository
-sudo python3 Tools/ManageMattOSRepositoryServer.py init
-sudo python3 Tools/ManageMattOSRepositoryServer.py token
+sudo install -d -m 0755 /srv/storage/Storage/MattOSPackageRepo
+sudo python3 Tools/ManageMattOSRepositoryServer.py setup
 ```
 
-Run the API as a dedicated service account, bind it to a private Tailscale or
-VPN address, and place the token in the client user's
-`~/.config/mattos-repository/token`. Serve the server's
-`/var/lib/mattos-repository/current` directory as the HTTPS APT repository
-path with Caddy or Nginx. The API is for mutations; APT clients should use the
-static HTTPS URL.
+The interactive Server Manager invokes the equivalent `setup` command. It
+creates the repository signing key and token, then displays the token once so
+it can be copied into the publisher clients. It does not start the API daemon
+inside the menu.
+
+Run the service as a dedicated account, bind it to a private Tailscale or VPN
+address, and place the token in the client user's
+`~/.config/mattos-repository/token`. The built-in service serves the APT
+repository at `/repository/`; a reverse proxy can add HTTPS or a custom
+hostname. The API mutations remain token-protected; APT clients use the
+static repository URL.
 
 The server manager supports `init`, `status`, `token`, `add`, `remove`,
 `list`, `verify`, and `serve`. Every mutation is serialized and publishes a
@@ -38,8 +43,8 @@ After=network-online.target
 [Service]
 User=mattos-repo
 WorkingDirectory=/opt/LinuxScripts
-Environment=MATTOS_REPOSITORY_ROOT=/var/lib/mattos-repository
-Environment=MATTOS_REPOSITORY_TOKEN_FILE=/etc/mattos-repository/token
+Environment=MATTOS_REPOSITORY_ROOT=/srv/storage/Storage/MattOSPackageRepo
+Environment=MATTOS_REPOSITORY_TOKEN_FILE=/srv/storage/Storage/MattOSPackageRepo/api-token
 Environment=MATTOS_REPOSITORY_PUBLIC_URL=https://packages.example/repository
 ExecStart=/usr/bin/python3 /opt/LinuxScripts/Tools/ManageMattOSRepositoryServer.py serve --bind 127.0.0.1 --port 8790
 Restart=on-failure
@@ -48,15 +53,23 @@ Restart=on-failure
 WantedBy=multi-user.target
 ```
 
-The service account must own the repository state and token file, and must
-have `reprepro`, `gpg`, and `dpkg-deb` installed. A reverse proxy can expose
-the API only through Tailscale/VPN and serve the repository separately, for
-example:
+The setup command installs `reprepro`, `gnupg`, and `dpkg-dev` automatically.
+The service account must own the repository state and token file. The built-in
+service serves the repository at `/repository/`; a reverse proxy can expose
+the API only through Tailscale/VPN and provide HTTPS, for example:
 
 ```text
-/repository/  -> /var/lib/mattos-repository/current/
+/repository/  -> /srv/storage/Storage/MattOSPackageRepo/current/
 /repository-api/ -> http://127.0.0.1:8790/
 ```
+
+Setup also installs `cloudflared` from Cloudflare's signed Debian package
+repository. Before running setup, create a remotely managed Cloudflare Tunnel
+and copy its connector token. The setup prompt accepts that token; it can also
+be supplied non-interactively with `MATTOS_CLOUDFLARE_TUNNEL_TOKEN`. When a
+token is available, setup creates and enables `cloudflared.service` using a
+protected token file. Without a token, setup still completes the local
+repository and service, and a later setup rerun will configure the tunnel.
 
 Run the Linux-only server administration interface with:
 

@@ -38,7 +38,10 @@ python3 Tools/ManageMattOSRepositoryServer.py token
 python3 Tools/ManageMattOSRepositoryServer.py serve --bind 127.0.0.1
 ```
 
-Set `MATTOS_REPOSITORY_ROOT` to the persistent repository location (the
-default is `/var/lib/mattos-repository`). Configure Caddy or Nginx to serve
-`/var/lib/mattos-repository/current` as the public `/repository` path. Keep
-the API private behind Tailscale, a VPN, or an authenticated reverse proxy.
+The service itself serves `/repository/` from the active release. A reverse
+proxy is optional if HTTPS or a custom hostname is needed. Keep the mutation
+API private behind Tailscale, a VPN, or an authenticated reverse proxy.
+
+Server setup also installs Cloudflare's `cloudflared` package and creates its
+systemd service when a tunnel token is supplied. The Cloudflare dashboard still
+must create the tunnel and hostname route; see `Docs/ServerManagement.md`.
