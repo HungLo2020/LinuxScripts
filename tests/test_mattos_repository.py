@@ -98,7 +98,7 @@ class RepositoryTests(unittest.TestCase):
             self.assertEqual(restored["mattpackages"].private_key_file, configs["mattos"].root / "private-key.asc")
             for name in client.REPOSITORIES:
                 config = client.Config.from_env(name)
-                self.assertEqual(config.server_url, "http://hunglosvr:8790")
+                self.assertEqual(config.server_url, "http://hunglosvr.tail30f889.ts.net:8790")
                 self.assertEqual(config.repository, name)
             self.assertEqual(client.Config.from_env("mattpackages").suite, "stable")
 

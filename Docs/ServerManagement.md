@@ -84,7 +84,7 @@ and `MATTOS_REPOSITORY_SERVICE_USER` customize service installation.
 
 ### Explicit client selection
 
-The standalone helper still defaults to `http://hunglosvr:8790`:
+The standalone helper still defaults to `http://hunglosvr.tail30f889.ts.net:8790`:
 
 ```bash
 python3 GenericScripts/ManageMattOSRepository.py --repo mattos list

@@ -29,7 +29,7 @@ if str(SOURCE_DIRECTORY) not in sys.path:
 REPOSITORIES = ("mattos", "mattpackages")
 SELECTION_ERROR = "Repository selection is required. Use --repo mattos or --repo mattpackages. No operation was performed."
 
-DEFAULT_SERVER_URL = "http://hunglosvr:8790"
+DEFAULT_SERVER_URL = "http://hunglosvr.tail30f889.ts.net:8790"
 DEFAULT_PUBLIC_URL = "https://packages.mattsherfey.com"
 DEFAULT_R2_ITEM = "MattOS R2 Repository Publisher"
 DEFAULT_GPG_ITEM = "MattOS Repository Signing Key"

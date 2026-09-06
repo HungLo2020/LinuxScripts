@@ -28,7 +28,7 @@ key export commands. Omitting `--repo` fails clearly without performing an
 operation. Old helpers using unqualified API requests are rejected by the server.
 There is no package ownership filtering or automatic package migration.
 
-The client defaults to `http://hunglosvr:8790`. The server retains Tailscale-based
+The client defaults to `http://hunglosvr.tail30f889.ts.net:8790`. The server retains Tailscale-based
 access, so clients need no Bitwarden or R2 configuration and no separate token.
 A transport override can be placed in `/etc/mattos-repository/client.conf` as
 `SERVER_URL=http://hostname:8790`.
