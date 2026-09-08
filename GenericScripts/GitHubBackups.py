@@ -5,7 +5,7 @@ from __future__ import annotations
 # Edit these settings, then rerun --install on the machine running the backups.
 GITHUB_USER = "HungLo2020"
 from pathlib import Path
-BACKUP_DESTINATION = Path.home() / "Downloads"
+BACKUP_DESTINATION = Path("/srv/storage/OneDrive/Apps/Programming")
 WORK_DIRECTORY = Path.home() / ".local/state/github-backups"
 
 import argparse
@@ -28,7 +28,8 @@ import urllib.parse
 import urllib.request
 
 UTC = timezone.utc
-ARCHIVE_PATTERN = re.compile(r"^backup_(\d{8}T\d{12}Z)\.tar\.zst$")
+ARCHIVE_TIME_FORMAT = "%Y-%m-%d_%H-%M-%S_UTC"
+ARCHIVE_PATTERN = re.compile(r"^backup_(\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}_UTC|\d{8}T\d{12}Z)\.tar\.zst$")
 UNIT = "github-public-backups"
 
 
@@ -85,7 +86,8 @@ def prune(destination, now):
         match = ARCHIVE_PATTERN.fullmatch(path.name)
         if match and path.is_file() and not path.is_symlink():
             try:
-                created = datetime.strptime(match[1], "%Y%m%dT%H%M%S%fZ").replace(tzinfo=UTC)
+                time_format = ARCHIVE_TIME_FORMAT if match[1].endswith("_UTC") else "%Y%m%dT%H%M%S%fZ"
+                created = datetime.strptime(match[1], time_format).replace(tzinfo=UTC)
                 archives.append((created, path))
             except ValueError:
                 continue
@@ -229,8 +231,10 @@ def file_digest(path):
 
 def create_archive(directory, destination, now):
     destination.mkdir(parents=True, exist_ok=True)
-    name = "backup_" + now.strftime("%Y%m%dT%H%M%S%fZ") + ".tar.zst"
+    name = "backup_" + now.astimezone(UTC).strftime(ARCHIVE_TIME_FORMAT) + ".tar.zst"
     final = destination / name
+    if final.exists():
+        raise RuntimeError(f"An archive already exists for this second: {final}")
     # Stage locally; a cloud sync destination sees only a completed archive rename.
     with tempfile.TemporaryDirectory(prefix="archive-", dir=directory.parent) as temporary:
         archive = Path(temporary) / name

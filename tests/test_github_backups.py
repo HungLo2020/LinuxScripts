@@ -50,7 +50,7 @@ class RetentionTests(unittest.TestCase):
             names = []
             for h in (0,6,12,18):
                 date = datetime(2026,9,5,h,tzinfo=UTC)
-                name = 'backup_'+date.strftime('%Y%m%dT%H%M%S%fZ')+'.tar.zst'
+                name = 'backup_' + (date.strftime(b.ARCHIVE_TIME_FORMAT) if h else date.strftime('%Y%m%dT%H%M%S%fZ')) + '.tar.zst'
                 names.append(name)
                 (current/name).touch(); (old/name).touch()
                 (current/(name+'.sha256')).touch()
@@ -179,7 +179,11 @@ class WorkflowTests(unittest.TestCase):
             subprocess.run(['git','clone','--mirror',str(repo),str(data/'repository.git')],check=True,capture_output=True)
             (data/'metadata').mkdir(); (data/'metadata/issues.json').write_text('[]')
             (data/'release-assets').mkdir(); (data/'release-assets/asset.bin').write_bytes(b'abc')
-            archive=b.create_archive(data,root/'out',datetime.now(UTC))
+            now = datetime(2026, 9, 8, 12, 34, 56, tzinfo=UTC)
+            archive=b.create_archive(data,root/'out',now)
+            self.assertEqual(archive.name, 'backup_2026-09-08_12-34-56_UTC.tar.zst')
+            with self.assertRaisesRegex(RuntimeError, 'already exists'):
+                b.create_archive(data,root/'out',now)
             restored=root/'restored';restored.mkdir()
             subprocess.run(['tar','--zstd','-xf',str(archive),'-C',str(restored)],check=True)
             result=subprocess.run(['git','--git-dir',str(restored/'repository.git'),'show','HEAD:hello.txt'],check=True,capture_output=True,text=True)

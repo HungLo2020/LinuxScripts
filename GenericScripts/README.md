@@ -43,7 +43,7 @@ See [server provisioning and configuration](../Docs/ServerManagement.md).
 `GitHubBackups.py` runs on the backup server. Edit the variables near its top:
 
 - `GITHUB_USER`: defaults to `HungLo2020`.
-- `BACKUP_DESTINATION`: defaults to the running user's `~/Downloads`.
+- `BACKUP_DESTINATION`: defaults to `/srv/storage/OneDrive/Apps/Programming`.
 - `WORK_DIRECTORY`: local persistent mirrors/cache, separate from the archive destination.
 
 It requires Linux, Python 3.10+, Git, GNU tar, and zstd. Installation additionally
@@ -72,8 +72,8 @@ Use one installation per server; the fixed service name is intentionally reused.
 Example output:
 
 ```text
-~/Downloads/HungLo2020/Markerup/backup_20260907T120000000000Z.tar.zst
-~/Downloads/HungLo2020/Markerup/backup_20260907T120000000000Z.tar.zst.sha256
+/srv/storage/OneDrive/Apps/Programming/HungLo2020/Markerup/backup_2026-09-07_12-00-00_UTC.tar.zst
+/srv/storage/OneDrive/Apps/Programming/HungLo2020/Markerup/backup_2026-09-07_12-00-00_UTC.tar.zst.sha256
 ```
 
 Each pass discovers all public repositories owned by the account, including forks
@@ -117,6 +117,9 @@ Retention uses UTC timestamps and keeps the newest successful archive unconditio
 | 1–5 years | 4 per calendar year (quarters) |
 | Older than 5 years | 2 per five-year period (30-month slots), indefinitely |
 
+Archive filenames explicitly use UTC and readable date/time separators. Retention also
+recognizes the earlier compact timestamp format.
+
 Five-year periods are anchored at years divisible by five, such as 2020–2024.
 The latest available archive in each applicable slot survives; incomplete periods
 or missed runs can have fewer representatives. Archives age into coarser tiers and
@@ -126,8 +129,8 @@ and destination checksum verification succeed. Archive creation stages locally,
 then uses a `.tmp` destination file followed by a completed-file rename.
 
 On HungLoSVR, `/srv/storage` is Samba-shared, but only `/srv/storage/OneDrive` is
-inside the inspected OneDrive client's sync directory. A future destination such
-as `/srv/storage/OneDrive/GitHubBackups` would use local synced storage. The separate
+inside the inspected OneDrive client's sync directory. The default destination
+`/srv/storage/OneDrive/Apps/Programming` uses this local synced storage. The separate
 `/home/matt/OneDrive` rclone mount is not necessary. Keep working mirrors off cloud
 mounts. Remote cloud upload completion is managed by OneDrive, not verified by this
 script.
