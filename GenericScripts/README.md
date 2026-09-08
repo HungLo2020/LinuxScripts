@@ -37,3 +37,113 @@ Run `python3 Tools/ServerManager.py` on the server and choose **Debian repositor
 management** to select and manage either archive. MattPackages starts empty,
 uses a separate R2 bucket, and shares the existing MattOS signing key.
 See [server provisioning and configuration](../Docs/ServerManagement.md).
+
+## Public GitHub backups
+
+`GitHubBackups.py` runs on the backup server. Edit the variables near its top:
+
+- `GITHUB_USER`: defaults to `HungLo2020`.
+- `BACKUP_DESTINATION`: defaults to the running user's `~/Downloads`.
+- `WORK_DIRECTORY`: local persistent mirrors/cache, separate from the archive destination.
+
+It requires Linux, Python 3.10+, Git, GNU tar, and zstd. Installation additionally
+requires systemd and sudo. It does not install dependencies or request GitHub
+credentials. Run installation as the account that should own the backups:
+
+```bash
+python3 GenericScripts/GitHubBackups.py --install
+```
+
+This installs a copy of the script and a system service/timer running as that user
+at 00:00, 06:00, 12:00, and 18:00 in the server's timezone. A persistent timer can
+catch up a missed activation. Installation enables the timer; it may therefore
+start a catch-up job. To run one pass manually:
+
+```bash
+python3 GenericScripts/GitHubBackups.py --run
+```
+
+Rerun `--install` after editing settings or updating the source script. Setup stops
+its existing timer/job before replacing its own installed copy and fixed unit
+names, then reenables the timer. It never moves or removes archives at the old
+destination. Subsequent runs only create/prune archives in the current destination.
+Use one installation per server; the fixed service name is intentionally reused.
+
+Example output:
+
+```text
+~/Downloads/HungLo2020/Markerup/backup_20260907T120000000000Z.tar.zst
+~/Downloads/HungLo2020/Markerup/backup_20260907T120000000000Z.tar.zst.sha256
+```
+
+Each pass discovers all public repositories owned by the account, including forks
+and archived repositories. Missing mirrors are cloned automatically; existing
+mirrors fetch incrementally, including branch/tag deletions. No pushes occur.
+Git configuration/credential helpers are disabled for these anonymous HTTPS fetches.
+Repository IDs identify cached mirrors, so a rename does not require a fresh clone;
+new archives use the current name, and archives in old named directories remain.
+Repositories no longer publicly listed are left on disk and are not pruned.
+
+Every successful repository pass creates a new, independently restorable archive,
+including when unchanged. Contents are:
+
+- `repository.git`: bare Git mirror, including history, branches, tags and tracked files.
+- `metadata`: repository details, open/closed issues, issue comments, published release
+  descriptions/asset metadata, and backup timestamp/scope in JSON.
+- `release-assets`: uploaded release downloads, cached locally to avoid downloading
+  unchanged assets on every pass. Previously cached assets are preserved as well.
+
+LFS payloads and referenced submodule repositories are not fetched; their committed
+pointers/references remain in Git. PR records returned by the issues API may appear,
+but PR review threads, issue attachments hosted elsewhere, wikis, discussions,
+Actions artifacts, and other GitHub web features are not exported. JSON is a readable
+export, not a promise of automatic restoration of GitHub issues or release records.
+
+Anonymous GitHub API limits are shared by the server's public IP. The job waits for
+rate-limit resets and paginates all collections. Large accounts can take longer than
+six hours; systemd and a file lock prevent overlapping jobs. Initial Git/asset downloads
+can be large. Archives include full copies of release downloads, so compression may
+not greatly reduce already compressed binaries. A failed repository does not prevent
+others being attempted and does not trigger retention for the failed repository.
+
+Retention uses UTC timestamps and keeps the newest successful archive unconditionally:
+
+| Age | Retained representatives |
+| --- | --- |
+| First 24 hours | Every run |
+| 1–7 days | 2 per day (12-hour slots) |
+| 7 days–1 calendar month | 4 per ISO week (four equal slots) |
+| 1 calendar month–1 year | 4 per calendar month (four equal slots) |
+| 1–5 years | 4 per calendar year (quarters) |
+| Older than 5 years | 2 per five-year period (30-month slots), indefinitely |
+
+Five-year periods are anchored at years divisible by five, such as 2020–2024.
+The latest available archive in each applicable slot survives; incomplete periods
+or missed runs can have fewer representatives. Archives age into coarser tiers and
+are deleted in place, not moved or recompressed. Only exact managed archive names
+and their checksum sidecars are pruned, after compression, integrity validation,
+and destination checksum verification succeed. Archive creation stages locally,
+then uses a `.tmp` destination file followed by a completed-file rename.
+
+On HungLoSVR, `/srv/storage` is Samba-shared, but only `/srv/storage/OneDrive` is
+inside the inspected OneDrive client's sync directory. A future destination such
+as `/srv/storage/OneDrive/GitHubBackups` would use local synced storage. The separate
+`/home/matt/OneDrive` rclone mount is not necessary. Keep working mirrors off cloud
+mounts. Remote cloud upload completion is managed by OneDrive, not verified by this
+script.
+
+To inspect the installed job:
+
+```bash
+systemctl status github-public-backups.timer
+journalctl -u github-public-backups.service
+```
+
+To restore a Git working tree, extract an archive into a new empty directory and
+clone its `repository.git` into another new directory. For example:
+
+```bash
+sha256sum -c backup_TIMESTAMP.tar.zst.sha256
+tar --zstd -xf backup_TIMESTAMP.tar.zst -C /path/to/empty-restore-directory
+git clone /path/to/empty-restore-directory/repository.git /path/to/restored-project
+```
