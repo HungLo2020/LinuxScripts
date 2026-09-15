@@ -67,6 +67,15 @@ def zip_backup_action() -> int:
     return zip_backup_main([])
 
 
+def github_backup_action() -> int:
+    """Install or update the user-owned GitHub backup timer."""
+
+    return subprocess.run(
+        (sys.executable, str(SOURCE_DIRECTORY / "server" / "github_backups.py"), "--install"),
+        check=False,
+    ).returncode
+
+
 def uptime_kuma_action() -> int:
     """Run the legacy-compatible Uptime Kuma droplet workload."""
 
@@ -107,6 +116,7 @@ def capabilities() -> tuple[tuple[str, str, Callable[[], int]], ...]:
         ("Container manager", "Queue Docker workload install, start, stop, or deletion actions", container_manager_action),
         ("Restic backup manager", "Configure, run, restore, and schedule local Restic backup jobs", restic_backup_action),
         ("ZIP backup manager", "Configure, archive, retain, and schedule local ZIP backup jobs", zip_backup_action),
+        ("GitHub backup manager", "Install or update the public GitHub backup timer", github_backup_action),
         ("Uptime Kuma", "Install, start, stop, or remove the Uptime Kuma monitoring container", uptime_kuma_action),
         ("Debian repository management", "Set up and manage MattOS or MattPackages", mattos_repository_action),
     )

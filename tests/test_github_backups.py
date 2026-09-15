@@ -10,7 +10,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-SPEC = importlib.util.spec_from_file_location('github_backups', Path(__file__).resolve().parents[1] / 'GenericScripts/GitHubBackups.py')
+SPEC = importlib.util.spec_from_file_location('github_backups', Path(__file__).resolve().parents[1] / 'src/server/github_backups.py')
 b = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(b)
 UTC = timezone.utc

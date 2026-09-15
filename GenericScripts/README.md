@@ -40,7 +40,8 @@ See [server provisioning and configuration](../Docs/ServerManagement.md).
 
 ## Public GitHub backups
 
-`GitHubBackups.py` runs on the backup server. Edit the variables near its top:
+The GitHub backup manager lives in `src/server/github_backups.py` and runs on the
+backup server. Edit the variables near the top of that module:
 
 - `GITHUB_USER`: defaults to `HungLo2020`.
 - `BACKUP_DESTINATION`: defaults to `/srv/storage/OneDrive/Apps/Programming`.
@@ -51,16 +52,19 @@ requires systemd and sudo. It does not install dependencies or request GitHub
 credentials. Run installation as the account that should own the backups:
 
 ```bash
-python3 GenericScripts/GitHubBackups.py --install
+python3 Tools/ServerManager.py
 ```
+
+Choose **GitHub backup manager** to install or update the timer. This invokes the
+manager with `--install` as the current user.
 
 This installs a copy of the script and a system service/timer running as that user
 at 00:00, 06:00, 12:00, and 18:00 in the server's timezone. A persistent timer can
 catch up a missed activation. Installation enables the timer; it may therefore
-start a catch-up job. To run one pass manually:
+start a catch-up job. For an exceptional manual one-pass run:
 
 ```bash
-python3 GenericScripts/GitHubBackups.py --run
+python3 src/server/github_backups.py --run
 ```
 
 Rerun `--install` after editing settings or updating the source script. Setup stops

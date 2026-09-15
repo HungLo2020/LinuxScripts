@@ -157,7 +157,7 @@ Run the Linux-only server administration interface with:
 python3 Tools/ServerManager.py
 ```
 
-The Btrfs Snapshot Manager elevates independently because it manages Btrfs subvolumes. Container and Restic management intentionally run as the invoking user, preserving user-owned service data and configuration.
+The Btrfs Snapshot Manager elevates independently because it manages Btrfs subvolumes. Container, Restic, ZIP, and GitHub backup management intentionally run as the invoking user, preserving user-owned service data and configuration. GitHub backup setup invokes `src/server/github_backups.py --install`, which installs or updates its persistent six-hour timer.
 
 ## Restic Backups
 
