@@ -32,6 +32,14 @@ ARCHIVE_TIME_FORMAT = "%Y-%m-%d_%H-%M-%S_UTC"
 ARCHIVE_PATTERN = re.compile(r"^backup_(\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}_UTC|\d{8}T\d{12}Z)\.tar\.zst$")
 UNIT = "github-public-backups"
 
+# The GitHub job is an orchestration layer. Archive creation and checksum
+# publication are delegated to the generic Zip Backup Manager engine next to
+# this script, both in the repository and in the installed runtime directory.
+BACKEND_DIRECTORY = Path(__file__).resolve().parent
+if str(BACKEND_DIRECTORY) not in sys.path:
+    sys.path.insert(0, str(BACKEND_DIRECTORY))
+from zip_backups import ArchiveSpec, ZipBackupManager
+
 
 def run(args, **kwargs):
     return subprocess.run([str(arg) for arg in args], check=True, **kwargs)
@@ -92,10 +100,7 @@ def prune(destination, now):
             except ValueError:
                 continue
     keep = retained_archives(archives, now)
-    for _, path in archives:
-        if path not in keep:
-            path.unlink()
-            path.with_name(path.name + ".sha256").unlink(missing_ok=True)
+    ZipBackupManager().prune_paths(archives, keep)
 
 
 class GitHub:
@@ -230,28 +235,19 @@ def file_digest(path):
 
 
 def create_archive(directory, destination, now):
-    destination.mkdir(parents=True, exist_ok=True)
     name = "backup_" + now.astimezone(UTC).strftime(ARCHIVE_TIME_FORMAT) + ".tar.zst"
-    final = destination / name
-    if final.exists():
-        raise RuntimeError(f"An archive already exists for this second: {final}")
-    # Stage locally; a cloud sync destination sees only a completed archive rename.
-    with tempfile.TemporaryDirectory(prefix="archive-", dir=directory.parent) as temporary:
-        archive = Path(temporary) / name
-        run(["tar", "--zstd", "-cf", archive, "-C", directory, "repository.git", "metadata", "release-assets"], timeout=21600)
-        run(["zstd", "--test", "--quiet", archive], timeout=21600)
-        run(["tar", "--zstd", "-tf", archive], stdout=subprocess.DEVNULL, timeout=21600)
-        digest = file_digest(archive)
-        partial = destination / (name + ".tmp")
-        try:
-            shutil.copyfile(archive, partial)
-            if file_digest(partial) != digest:
-                raise RuntimeError("Archive copy checksum mismatch")
-            partial.replace(final)
-        finally:
-            partial.unlink(missing_ok=True)
-        final.with_name(name + ".sha256").write_text(f"{digest}  {name}\n")
-    return final
+    manager = ZipBackupManager()
+    return manager.create_tar_zst(
+        ArchiveSpec(
+            source_root=directory,
+            members=("repository.git", "metadata", "release-assets"),
+            destination=destination,
+            prefix="backup",
+            timestamp_format=ARCHIVE_TIME_FORMAT,
+            checksum_name=name,
+        ),
+        now=now,
+    )
 
 
 @contextlib.contextmanager
@@ -353,6 +349,10 @@ def install():
         temporary = installed.with_suffix(".tmp")
         temporary.write_bytes(Path(__file__).read_bytes())
         temporary.replace(installed)
+        backend = installed.with_name("zip_backups.py")
+        backend_temporary = backend.with_suffix(".tmp")
+        backend_temporary.write_bytes(BACKEND_DIRECTORY.joinpath("zip_backups.py").read_bytes())
+        backend_temporary.replace(backend)
         service, timer = unit_contents(user, installed)
         with tempfile.TemporaryDirectory() as directory:
             for suffix, contents in (("service", service), ("timer", timer)):

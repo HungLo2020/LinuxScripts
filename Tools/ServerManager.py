@@ -62,7 +62,7 @@ def restic_backup_action() -> int:
 
 
 def zip_backup_action() -> int:
-    """Run the legacy-compatible user-owned ZIP backup manager."""
+    """Run the user-owned tar.zst backup manager (legacy name retained)."""
 
     return zip_backup_main([])
 
@@ -115,7 +115,7 @@ def capabilities() -> tuple[tuple[str, str, Callable[[], int]], ...]:
         ("Btrfs snapshot manager", "Manage snapshots under /srv/storage/snapshots", btrfs_snapshot_action),
         ("Container manager", "Queue Docker workload install, start, stop, or deletion actions", container_manager_action),
         ("Restic backup manager", "Configure, run, restore, and schedule local Restic backup jobs", restic_backup_action),
-        ("ZIP backup manager", "Configure, archive, retain, and schedule local ZIP backup jobs", zip_backup_action),
+        ("ZIP backup manager", "Configure, archive, retain, and schedule local tar.zst backup jobs", zip_backup_action),
         ("GitHub backup manager", "Install or update the public GitHub backup timer", github_backup_action),
         ("Uptime Kuma", "Install, start, stop, or remove the Uptime Kuma monitoring container", uptime_kuma_action),
         ("Debian repository management", "Set up and manage MattOS or MattPackages", mattos_repository_action),

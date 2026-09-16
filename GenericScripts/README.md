@@ -43,6 +43,11 @@ See [server provisioning and configuration](../Docs/ServerManagement.md).
 The GitHub backup manager lives in `src/server/github_backups.py` and runs on the
 backup server. Edit the variables near the top of that module:
 
+GitHub remains the repository-discovery and mirror orchestration layer, but it
+delegates tar.zst creation, validation, checksums, and archive cleanup directly
+to the generic Zip Backup Manager engine in `src/server/zip_backups.py`. Its
+installer deploys both files together so the systemd job uses the same engine.
+
 - `GITHUB_USER`: defaults to `HungLo2020`.
 - `BACKUP_DESTINATION`: defaults to `/srv/storage/OneDrive/Apps/Programming`.
 - `WORK_DIRECTORY`: local persistent mirrors/cache, separate from the archive destination.
