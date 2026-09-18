@@ -76,6 +76,15 @@ def github_backup_action() -> int:
     ).returncode
 
 
+def cryptomator_action() -> int:
+    """Run the standalone, user-owned Cryptomator setup and status manager."""
+
+    return subprocess.run(
+        (sys.executable, str(REPOSITORY_ROOT / "Tools" / "ManageCryptomator.py")),
+        check=False,
+    ).returncode
+
+
 def uptime_kuma_action() -> int:
     """Run the legacy-compatible Uptime Kuma droplet workload."""
 
@@ -117,6 +126,7 @@ def capabilities() -> tuple[tuple[str, str, Callable[[], int]], ...]:
         ("Restic backup manager", "Configure, run, restore, and schedule local Restic backup jobs", restic_backup_action),
         ("ZIP backup manager", "Configure, archive, retain, and schedule local tar.zst backup jobs", zip_backup_action),
         ("GitHub backup manager", "Install or update the public GitHub backup timer", github_backup_action),
+        ("Cryptomator vault manager", "Configure the boot-time MattsVault mount and optional Jellyfin access", cryptomator_action),
         ("Uptime Kuma", "Install, start, stop, or remove the Uptime Kuma monitoring container", uptime_kuma_action),
         ("Debian repository management", "Set up and manage MattOS or MattPackages", mattos_repository_action),
     )

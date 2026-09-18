@@ -196,3 +196,29 @@ python3 src/containers/run_uptime_kuma.py
 ```
 
 It preserves the no-argument install/update/start behavior and `--on`, `--off`, and `-D` lifecycle flags. The container is named `uptime-kuma`, uses `louislam/uptime-kuma:latest`, persists data at `~/.uptime-kuma/data`, and serves the UI at `http://localhost:3002` by default. Set `UPTIME_KUMA_PORT` before running it to select another host port.
+
+## Cryptomator and Jellyfin
+
+Server Manager includes a standalone Cryptomator vault manager, also available as:
+
+```bash
+python3 Tools/ManageCryptomator.py
+```
+
+Setup mounts the decrypted MattsVault at `/mnt/cryptomator/mattsvault`, outside
+the `/srv/storage` Samba tree. It installs a pinned Cryptomator CLI, a root-owned
+runtime and configuration, the narrowly scoped AppArmor rules required by FUSE,
+and an enabled `cryptomator-mattsvault.service`. Setup and reconciliation restart
+the vault service and succeed only after the mount is a non-empty FUSE filesystem.
+
+The password is stored separately with mode `0600` under the configuring user's
+`~/.config/cryptomator-vault-manager/credentials/` directory. Existing password
+and service files are detected, and interactive setup asks before replacing them.
+Automatic unlocking necessarily means the server can obtain this password at boot.
+
+The optional `cryptomator-mattsvault-jellyfin.service` is installed but is not
+enabled automatically. Jellyfin's base Compose stack has no Cryptomator dependency and starts
+normally while the vault is unavailable. Enabling the integration explicitly may
+recreate only Jellyfin, adding the decrypted mount read-only at `/vault-media`.
+The watcher reattaches it if the base container is recreated and removes the bind
+before an intentional vault shutdown.
