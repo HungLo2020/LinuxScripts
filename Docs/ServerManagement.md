@@ -208,7 +208,9 @@ python3 Tools/ManageCryptomator.py
 Setup mounts the decrypted MattsVault at `/mnt/cryptomator/mattsvault`, outside
 the `/srv/storage` Samba tree. It installs a pinned Cryptomator CLI, a root-owned
 runtime and configuration, the narrowly scoped AppArmor rules required by FUSE,
-and an enabled `cryptomator-mattsvault.service`. Setup and reconciliation restart
+enables `user_allow_other` in `/etc/fuse.conf`, mounts with Cryptomator's required
+`--mountOption=-oallow_other` syntax, and installs an enabled
+`cryptomator-mattsvault.service`. Setup and reconciliation restart
 the vault service and succeed only after the mount is a non-empty FUSE filesystem.
 
 The password is stored separately with mode `0600` under the configuring user's
@@ -221,4 +223,32 @@ enabled automatically. Jellyfin's base Compose stack has no Cryptomator dependen
 normally while the vault is unavailable. Enabling the integration explicitly may
 recreate only Jellyfin, adding the decrypted mount read-only at `/vault-media`.
 The watcher reattaches it if the base container is recreated and removes the bind
-before an intentional vault shutdown.
+before an intentional vault shutdown. Enabling the integration first verifies
+that the live FUSE mount allows Docker access, then waits until Jellyfin itself
+can enumerate non-empty `/vault-media` contents. If the mount predates this
+support, run the manager's reconcile option before enabling integration.
+
+### Activating the Jellyfin mount
+
+Starting from `python3 Tools/ServerManager.py`:
+
+1. Select **Cryptomator vault manager** and confirm the Server Manager prompt.
+2. Select **Reconcile installed files and restart vault**. This updates the
+   deployed helper and remounts the vault with Docker access; it does not touch
+   Jellyfin while the optional integration is disabled.
+3. Select **Show status** and require `mount access ready`, an enabled/active
+   vault service, and a nonzero content count.
+4. Select **Enable optional Jellyfin integration**, then confirm the explicit
+   warning that only Jellyfin will be recreated. Do not continue until the
+   manager reports that Jellyfin can read nonzero `/vault-media` entries.
+5. Before creating the library, open **Dashboard → Users → Library Access** for
+   every user who must not see it. Turn off access to all libraries and select
+   only the existing libraries that user should retain. Jellyfin otherwise gives
+   users with “access to all libraries” automatic access to newly added ones.
+6. Open **Administration Dashboard → Server → Libraries**, add a dedicated media
+   library, and enter `/vault-media` as its folder. Prefer a specific content
+   type over `Mixed` when the vault layout permits it.
+
+The mount is intentionally read-only in Jellyfin. Metadata, artwork, and the
+Jellyfin database remain under the regular `/config` bind rather than being
+written into the decrypted vault.

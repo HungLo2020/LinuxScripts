@@ -39,6 +39,7 @@ INTEGRATION_SERVICE_PATH = Path("/etc/systemd/system") / INTEGRATION_SERVICE_NAM
 APPARMOR_PROFILE = Path("/etc/apparmor.d/fusermount3")
 APPARMOR_LOCAL = Path("/etc/apparmor.d/local/fusermount3")
 APPARMOR_MARKER = "LinuxScripts Cryptomator vault: mattsvault"
+FUSE_CONFIG = Path("/etc/fuse.conf")
 
 
 @dataclass(frozen=True)
@@ -207,6 +208,32 @@ def install_prerequisites() -> None:
         print("Warning: Docker is unavailable; Jellyfin integration will remain idle.")
 
 
+def fuse_config_contents(contents: str) -> str:
+    """Enable non-owner FUSE access without disturbing distribution settings."""
+
+    if any(line.strip() == "user_allow_other" for line in contents.splitlines()):
+        return contents
+    prefix = contents.rstrip()
+    block = "# Enabled by LinuxScripts for Docker access to Cryptomator\nuser_allow_other\n"
+    return (prefix + "\n\n" if prefix else "") + block
+
+
+def fuse_allows_other() -> bool:
+    try:
+        return any(line.strip() == "user_allow_other" for line in FUSE_CONFIG.read_text(encoding="utf-8").splitlines())
+    except OSError:
+        return False
+
+
+def configure_fuse() -> None:
+    if FUSE_CONFIG.exists() and (FUSE_CONFIG.is_symlink() or not FUSE_CONFIG.is_file()):
+        raise RuntimeError(f"refusing to replace non-regular FUSE configuration: {FUSE_CONFIG}")
+    existing = FUSE_CONFIG.read_text(encoding="utf-8") if FUSE_CONFIG.is_file() else ""
+    updated = fuse_config_contents(existing)
+    if updated != existing:
+        write_root_file(FUSE_CONFIG, updated, "0644")
+
+
 def apparmor_block(config: VaultConfiguration) -> str:
     mount = str(config.mount).replace("\\", "\\\\").replace(" ", "\\ ").rstrip("/") + "/"
     parent = str(config.mount.parent).replace("\\", "\\\\").replace(" ", "\\ ").rstrip("/") + "/"
@@ -336,15 +363,19 @@ def install_runtime(config: VaultConfiguration, source: Path) -> None:
     write_root_file(SERVICE_PATH, vault_service(config), "0644")
     write_root_file(INTEGRATION_SERVICE_PATH, integration_service(config), "0644")
     config.stack.mkdir(parents=True, exist_ok=True)
-    override = override_path(config)
-    override.write_text(override_contents(config), encoding="utf-8")
-    override.chmod(0o600)
+    write_override(config)
     sudo(("systemctl", "daemon-reload"))
 
 
 def is_mounted(config: VaultConfiguration) -> bool:
     result = run(("findmnt", "-rn", "--mountpoint", str(config.mount), "-o", "FSTYPE"), check=False, capture_output=True, text=True)
     return result.returncode == 0 and result.stdout.strip().startswith("fuse")
+
+
+def mount_allows_other(config: VaultConfiguration) -> bool:
+    result = run(("findmnt", "-rn", "--mountpoint", str(config.mount), "-o", "OPTIONS"), check=False, capture_output=True, text=True)
+    options = {option.strip() for option in result.stdout.strip().split(",")}
+    return result.returncode == 0 and "allow_other" in options
 
 
 def mounted_entry_count(config: VaultConfiguration) -> int:
@@ -391,6 +422,33 @@ def jellyfin_has_mount(config: VaultConfiguration) -> bool:
     return any(item.get("Source") == str(config.mount) and item.get("Destination") == config.jellyfin_target and item.get("RW") is False for item in mounts)
 
 
+def jellyfin_entry_count(config: VaultConfiguration) -> int:
+    """Count visible top-level entries as Jellyfin's numeric UID/GID."""
+
+    if not jellyfin_has_mount(config):
+        return 0
+    result = run(
+        (
+            "docker",
+            "exec",
+            "--user",
+            f"{config.uid}:{config.gid}",
+            "jellyfin",
+            "find",
+            config.jellyfin_target,
+            "-mindepth",
+            "1",
+            "-maxdepth",
+            "1",
+            "-printf",
+            "x",
+        ),
+        check=False,
+        capture_output=True,
+    )
+    return len(result.stdout) if result.returncode == 0 else 0
+
+
 def compose_command(config: VaultConfiguration, *, with_override: bool) -> tuple[str, ...]:
     command = ["docker", "compose", "-f", str(config.stack / "docker-compose.yml")]
     if with_override:
@@ -399,11 +457,26 @@ def compose_command(config: VaultConfiguration, *, with_override: bool) -> tuple
     return tuple(command)
 
 
+def write_override(config: VaultConfiguration) -> Path:
+    path = override_path(config)
+    desired = override_contents(config)
+    if path.is_file() and path.read_text(encoding="utf-8") == desired:
+        path.chmod(0o600)
+        return path
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    temporary.write_text(desired, encoding="utf-8")
+    temporary.chmod(0o600)
+    temporary.replace(path)
+    return path
+
+
 def attach_jellyfin(config: VaultConfiguration) -> bool:
-    if not is_mounted(config) or mounted_entry_count(config) == 0 or not jellyfin_files_exist(config) or not docker_available() or not jellyfin_running():
+    if not is_mounted(config) or not mount_allows_other(config) or mounted_entry_count(config) == 0 or not jellyfin_files_exist(config) or not docker_available() or not jellyfin_running():
         return False
     if jellyfin_has_mount(config):
         return True
+    write_override(config)
     run((*compose_command(config, with_override=True), "up", "-d", "--no-deps", "--force-recreate", "jellyfin"))
     return jellyfin_has_mount(config)
 
@@ -424,15 +497,42 @@ def watch_jellyfin(config: VaultConfiguration) -> None:
         time.sleep(15)
 
 
+def wait_for_jellyfin_mount(config: VaultConfiguration, timeout: int = 120) -> int:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        count = jellyfin_entry_count(config)
+        if count:
+            return count
+        time.sleep(1)
+    service_status = run(("systemctl", "status", INTEGRATION_SERVICE_NAME, "--no-pager", "-l"), check=False, capture_output=True, text=True)
+    raise RuntimeError(f"Jellyfin did not receive a non-empty {config.jellyfin_target} mount within {timeout}s\n{service_status.stdout}{service_status.stderr}")
+
+
 def run_mount(config: VaultConfiguration) -> None:
     validate_configuration(config)
     if is_mounted(config):
         raise RuntimeError(f"mount point is already mounted: {config.mount}")
     binary = cli_binary()
-    command = [str(binary), "unlock", "--password:stdin", f"--mounter={FUSE_MOUNTER}", f"--mountPoint={config.mount}", str(config.vault)]
+    if not fuse_allows_other():
+        raise RuntimeError(f"{FUSE_CONFIG} must contain user_allow_other before mounting for Docker")
+    command = unlock_command(config, binary)
     with config.password.open("rb") as password:
         os.dup2(password.fileno(), 0)
         os.execv(str(binary), command)
+
+
+def unlock_command(config: VaultConfiguration, binary: Path) -> list[str]:
+    """Build the CLI command with the exact libfuse option syntax."""
+
+    return [
+        str(binary),
+        "unlock",
+        "--password:stdin",
+        f"--mounter={FUSE_MOUNTER}",
+        f"--mountPoint={config.mount}",
+        "--mountOption=-oallow_other",
+        str(config.vault),
+    ]
 
 
 def cleanup_mount(config: VaultConfiguration) -> None:
@@ -514,6 +614,7 @@ def reconcile(config: VaultConfiguration, source: Path) -> None:
     validate_configuration(config)
     install_prerequisites()
     install_cli()
+    configure_fuse()
     sudo(("install", "-d", "-m", "0750", "-o", config.service_user, "-g", config.service_user, str(config.mount.parent)))
     # GNU install treats an active FUSE mountpoint as an existing non-directory
     # on some systems. Preserve it during idempotent reconciliation; systemd's
@@ -543,19 +644,42 @@ def status(config: VaultConfiguration) -> int:
     active = run(("systemctl", "is-active", SERVICE_NAME), check=False, capture_output=True, text=True).stdout.strip()
     integration = run(("systemctl", "is-enabled", INTEGRATION_SERVICE_NAME), check=False, capture_output=True, text=True).stdout.strip()
     count = mounted_entry_count(config)
+    docker_ready = mount_allows_other(config)
+    attached = jellyfin_has_mount(config) if docker_available() and jellyfin_running() else False
+    visible = jellyfin_entry_count(config) if attached else 0
     print(f"Vault:       {config.vault}")
     print(f"Mount:       {config.mount}")
     print(f"Service:     {enabled or 'unknown'}, {active or 'unknown'}")
     print(f"Contents:    {count} top-level entries" if count else "Contents:    unavailable or empty")
-    print(f"Jellyfin:    integration {integration or 'disabled'}; target {config.jellyfin_target}")
-    return 0 if enabled == "enabled" and active == "active" and count else 1
+    print(f"Docker:      {'mount access ready' if docker_ready else 'run reconcile to enable allow_other'}")
+    print(f"Jellyfin:    integration {integration or 'disabled'}; {'attached' if attached else 'not attached'}; {visible} visible entries")
+    return 0 if enabled == "enabled" and active == "active" and count and docker_ready else 1
 
 
 def enable_jellyfin(config: VaultConfiguration) -> None:
+    validate_configuration(config)
+    if not is_mounted(config) or not mounted_entry_count(config):
+        raise RuntimeError("the Cryptomator vault is unavailable or empty; run reconcile first")
+    if not fuse_allows_other() or not mount_allows_other(config):
+        raise RuntimeError("the live vault mount is not accessible to Docker; choose reconcile first to remount it with allow_other")
+    if not jellyfin_files_exist(config) or not docker_available() or not jellyfin_running():
+        raise RuntimeError("the Jellyfin Compose stack and running container are required before enabling integration")
     if not prompt_yes_no("Enable integration now? This may recreate only the Jellyfin container."):
         print("Jellyfin integration remains disabled.")
         return
     sudo(("systemctl", "enable", "--now", INTEGRATION_SERVICE_NAME))
+    entries = wait_for_jellyfin_mount(config)
+    print(f"Jellyfin can read {entries} top-level entries from {config.jellyfin_target}.")
+
+
+def disable_jellyfin(config: VaultConfiguration) -> None:
+    if not prompt_yes_no("Disable integration now? This may recreate only the Jellyfin container."):
+        print("Jellyfin integration was left unchanged.")
+        return
+    sudo(("systemctl", "disable", "--now", INTEGRATION_SERVICE_NAME), check=False)
+    if jellyfin_has_mount(config):
+        raise RuntimeError(f"Jellyfin still has {config.jellyfin_target} after disabling integration")
+    print("Jellyfin integration is disabled and the optional mount is detached.")
 
 
 def menu(source: Path) -> int:
@@ -585,7 +709,7 @@ def menu(source: Path) -> int:
                 elif choice == "4":
                     enable_jellyfin(config)
                 elif choice == "5":
-                    sudo(("systemctl", "disable", "--now", INTEGRATION_SERVICE_NAME), check=False)
+                    disable_jellyfin(config)
                 else:
                     print("Invalid selection.")
         except (OSError, RuntimeError, subprocess.CalledProcessError, ValueError) as error:
@@ -620,7 +744,7 @@ def main(argv: list[str] | None = None) -> int:
         elif args.enable_jellyfin:
             enable_jellyfin(config)
         elif args.disable_jellyfin:
-            sudo(("systemctl", "disable", "--now", INTEGRATION_SERVICE_NAME), check=False)
+            disable_jellyfin(config)
         elif args.run_mount:
             run_mount(config)
         elif args.watch_jellyfin:

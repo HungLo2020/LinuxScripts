@@ -20,7 +20,11 @@ from server.cryptomator import (
     INTEGRATION_SERVICE_NAME,
     SERVICE_NAME,
     VaultConfiguration,
+    attach_jellyfin,
     apparmor_block,
+    detach_jellyfin,
+    enable_jellyfin,
+    fuse_config_contents,
     integration_service,
     load_config,
     override_contents,
@@ -28,6 +32,8 @@ from server.cryptomator import (
     replace_marked_block,
     validate_configuration,
     vault_service,
+    unlock_command,
+    write_override,
 )
 
 
@@ -94,6 +100,99 @@ class CryptomatorTests(unittest.TestCase):
         self.assertIn("read_only: true", override)
         self.assertIn("create_host_path: false", override)
         self.assertIn('target: "/vault-media"', override)
+
+    def test_fuse_allow_other_configuration_is_idempotent(self):
+        initial = "#user_allow_other\n#mount_max = 1000\n"
+        configured = fuse_config_contents(initial)
+        self.assertIn("\nuser_allow_other\n", configured)
+        self.assertEqual(fuse_config_contents(configured), configured)
+
+    def test_unlock_command_uses_cryptomator_supported_allow_other_syntax(self):
+        with tempfile.TemporaryDirectory() as directory:
+            config = self.config(Path(directory))
+        command = unlock_command(config, Path("/opt/cryptomator-cli"))
+        self.assertIn("--mountOption=-oallow_other", command)
+        self.assertNotIn("--mountOption=allow_other", command)
+
+    def test_override_is_repaired_without_changing_its_target(self):
+        with tempfile.TemporaryDirectory() as directory:
+            config = self.config(Path(directory))
+            config.stack.mkdir()
+            path = config.stack / "cryptomator.compose.yml"
+            path.write_text("stale\n", encoding="utf-8")
+            self.assertEqual(write_override(config), path)
+            self.assertEqual(path.read_text(encoding="utf-8"), override_contents(config))
+            self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+
+    def test_enable_refuses_to_recreate_jellyfin_without_allow_other(self):
+        with tempfile.TemporaryDirectory() as directory:
+            config = self.config(Path(directory))
+            with (
+                patch("server.cryptomator.validate_configuration"),
+                patch("server.cryptomator.is_mounted", return_value=True),
+                patch("server.cryptomator.mounted_entry_count", return_value=2),
+                patch("server.cryptomator.fuse_allows_other", return_value=True),
+                patch("server.cryptomator.mount_allows_other", return_value=False),
+                patch("server.cryptomator.sudo") as sudo,
+            ):
+                with self.assertRaisesRegex(RuntimeError, "choose reconcile first"):
+                    enable_jellyfin(config)
+        sudo.assert_not_called()
+
+    def test_enable_waits_until_jellyfin_can_read_nonempty_mount(self):
+        with tempfile.TemporaryDirectory() as directory:
+            config = self.config(Path(directory))
+            config.stack.mkdir()
+            (config.stack / "docker-compose.yml").touch()
+            (config.stack / ".env").touch()
+            with (
+                patch("server.cryptomator.validate_configuration"),
+                patch("server.cryptomator.is_mounted", return_value=True),
+                patch("server.cryptomator.mounted_entry_count", return_value=2),
+                patch("server.cryptomator.fuse_allows_other", return_value=True),
+                patch("server.cryptomator.mount_allows_other", return_value=True),
+                patch("server.cryptomator.docker_available", return_value=True),
+                patch("server.cryptomator.jellyfin_running", return_value=True),
+                patch("server.cryptomator.prompt_yes_no", return_value=True),
+                patch("server.cryptomator.wait_for_jellyfin_mount", return_value=2),
+                patch("server.cryptomator.sudo") as sudo,
+            ):
+                enable_jellyfin(config)
+        sudo.assert_called_once_with(("systemctl", "enable", "--now", INTEGRATION_SERVICE_NAME))
+
+    def test_attach_recreates_only_jellyfin_with_override(self):
+        with tempfile.TemporaryDirectory() as directory:
+            config = self.config(Path(directory))
+            with (
+                patch("server.cryptomator.is_mounted", return_value=True),
+                patch("server.cryptomator.mount_allows_other", return_value=True),
+                patch("server.cryptomator.mounted_entry_count", return_value=2),
+                patch("server.cryptomator.jellyfin_files_exist", return_value=True),
+                patch("server.cryptomator.docker_available", return_value=True),
+                patch("server.cryptomator.jellyfin_running", return_value=True),
+                patch("server.cryptomator.jellyfin_has_mount", side_effect=[False, True]),
+                patch("server.cryptomator.write_override"),
+                patch("server.cryptomator.run") as run,
+            ):
+                self.assertTrue(attach_jellyfin(config))
+        command = run.call_args.args[0]
+        self.assertIn(str(config.stack / "cryptomator.compose.yml"), command)
+        self.assertEqual(command[-5:], ("up", "-d", "--no-deps", "--force-recreate", "jellyfin"))
+
+    def test_detach_recreates_only_jellyfin_from_base_compose(self):
+        with tempfile.TemporaryDirectory() as directory:
+            config = self.config(Path(directory))
+            with (
+                patch("server.cryptomator.docker_available", return_value=True),
+                patch("server.cryptomator.jellyfin_files_exist", return_value=True),
+                patch("server.cryptomator.jellyfin_running", return_value=True),
+                patch("server.cryptomator.jellyfin_has_mount", return_value=True),
+                patch("server.cryptomator.run") as run,
+            ):
+                self.assertTrue(detach_jellyfin(config))
+        command = run.call_args.args[0]
+        self.assertNotIn(str(config.stack / "cryptomator.compose.yml"), command)
+        self.assertEqual(command[-5:], ("up", "-d", "--no-deps", "--force-recreate", "jellyfin"))
 
     def test_apparmor_rule_covers_mount_and_fuse_cleanup(self):
         with tempfile.TemporaryDirectory() as directory:
