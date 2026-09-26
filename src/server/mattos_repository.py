@@ -43,11 +43,13 @@ DEFAULT_COMPONENT = "main"
 DEFAULT_ARCHITECTURES = ("amd64",)
 DEFAULT_BIND = "127.0.0.1"
 DEFAULT_PORT = 8790
+PUBLIC_PORTS = {"mattos": 8791, "mattpackages": 8792}
 DEFAULT_R2_ITEM = "MattOS R2 Repository Publisher"
 DEFAULT_GPG_ITEM = "MattOS Repository Signing Key"
 DEFAULT_BUCKET = "matt-apt-repo"
 SERVICE_NAME = "mattos-repository.service"
 SERVICE_PATH = Path("/etc/systemd/system") / SERVICE_NAME
+PUBLIC_SERVICE_NAMES = {name: f"mattos-repository-{name}-public.service" for name in REPOSITORIES}
 
 
 class RepositoryError(RuntimeError):
@@ -97,8 +99,8 @@ def provision_client_token(token: str, user: str) -> None:
     os.chmod(path, 0o600)
 
 
-def install_dependencies() -> None:
-    required = ("reprepro", "gpg", "dpkg-deb", "boto3")
+def install_dependencies(*, require_r2: bool = True) -> None:
+    required = ("reprepro", "gpg", "dpkg-deb") + (("boto3",) if require_r2 else ())
     missing = [name for name in required if (importlib.util.find_spec("boto3") is None if name == "boto3" else shutil.which(name) is None)]
     if not missing:
         return
@@ -165,6 +167,31 @@ def install_service(config_path: Path, user: str) -> None:
         raise RepositoryError("systemctl is required to install the MattOS repository service")
     privileged(["systemctl", "daemon-reload"])
     privileged(["systemctl", "enable", "--now", SERVICE_NAME])
+
+
+def public_service_definition(config_path: Path, user: str, repository: str) -> str:
+    script = Path(__file__).resolve().parents[2] / "Tools" / "ManageMattOSRepositoryServer.py"
+    return "\n".join((
+        "[Unit]", f"Description={repository} read-only Debian repository", "After=network-online.target", "Wants=network-online.target", "",
+        "[Service]", "Type=simple", f"User={user}", f"WorkingDirectory={script.parent.parent}",
+        f'ExecStart=/usr/bin/python3 "{script}" --repo {repository} --config "{config_path}" serve-public --bind 127.0.0.1 --port {PUBLIC_PORTS[repository]}',
+        "Restart=on-failure", "RestartSec=5", "", "[Install]", "WantedBy=multi-user.target", "",
+    ))
+
+
+def install_public_service(config_path: Path, user: str, repository: str) -> None:
+    name = PUBLIC_SERVICE_NAMES[repository]
+    path = Path("/etc/systemd/system") / name
+    with tempfile.NamedTemporaryFile("w", encoding="utf-8", prefix="mattos-repository-public-", suffix=".service", delete=False) as temporary:
+        temporary.write(public_service_definition(config_path, user, repository))
+        source = Path(temporary.name)
+    try:
+        privileged(["install", "-o", "root", "-g", "root", "-m", "0644", str(source), str(path)])
+    finally:
+        source.unlink(missing_ok=True)
+    privileged(["systemctl", "daemon-reload"])
+    privileged(["systemctl", "enable", name])
+    privileged(["systemctl", "restart", name])
 
 
 def run(command: list[str], *, cwd: Path | None = None, env: dict[str, str] | None = None) -> str:
@@ -550,22 +577,20 @@ class RepositoryManager:
         with self._lock() as handle:
             try:
                 active = self._active()
-                existing = sorted(active.rglob("*.deb")) if active else []
-                replacement = [path for path in existing if package_metadata(path) == (name, version, architecture)]
+                condition = f"Package (== {name}), $Version (== {version}), $Architecture (== {architecture})"
+                replacement = bool(run(["reprepro", "--basedir", str(active), "-T", "deb", "listfilter", self.config.suite, condition]).strip()) if active else False
                 if replacement and no_overwrites:
                     raise RepositoryError(f"Package already exists: {name} {version} ({architecture})")
                 stage = Path(tempfile.mkdtemp(prefix="mattos-repository-", dir=self.releases))
                 try:
+                    self._stage_from_active(stage)
                     incoming = stage / ".incoming.deb"
                     shutil.copy2(package, incoming)
                     if replacement:
-                        # Rebuild without the old package so reprepro accepts a
-                        # different payload with the same version.
-                        retained = [path for path in existing if path not in replacement]
-                        self._build(stage, [*retained, incoming])
-                    else:
-                        self._stage_from_active(stage)
-                        self._build(stage, [incoming])
+                        # Remove only this indexed build from the staged copy.
+                        # Export and signing happen once after the new include.
+                        run(["reprepro", "--basedir", str(stage), "--export=never", "-T", "deb", "removefilter", self.config.suite, condition])
+                    self._build(stage, [incoming])
                     incoming.unlink(missing_ok=True)
                     self._commit(stage)
                     self.synchronize_r2()
@@ -612,7 +637,7 @@ class RepositoryManager:
 
     def status(self) -> dict[str, Any]:
         active = self._active()
-        return {"repository": self.config.repository, "bucket": self.config.bucket, "initialized": active is not None, "root": str(self.root), "public_url": self.config.public_url, "suite": self.config.suite, "component": self.config.component, "architectures": list(self.config.architectures), "packages": len(self.packages())}
+        return {"repository": self.config.repository, "bucket": self.config.bucket, "publication": "r2" if self.config.r2_enabled else "local", "initialized": active is not None, "root": str(self.root), "public_url": self.config.public_url, "suite": self.config.suite, "component": self.config.component, "architectures": list(self.config.architectures), "packages": len(self.packages())}
 
     def public_key(self) -> str:
         with tempfile.TemporaryDirectory(prefix="mattos-public-key-") as temp:
@@ -643,7 +668,7 @@ class RepositoryManager:
 def setup_server(config: ServerConfig, configs: dict[str, ServerConfig], config_path: Path) -> None:
     """Set up only the selected archive; the shared service exposes both."""
     validate_configs(configs)
-    install_dependencies()
+    install_dependencies(require_r2=config.r2_enabled)
     user = service_user()
     for directory in (config.root, config.token_file.parent):
         privileged(["install", "-d", "-o", user, "-g", user, "-m", "0755", str(directory)])
@@ -697,7 +722,7 @@ class RepositoryHandler(BaseHTTPRequestHandler):
     def _error(self, status: int, message: str) -> None:
         self._send(status, {"error": message})
 
-    def _serve_repository_file(self, path: str) -> bool:
+    def _serve_repository_file(self, path: str, *, head_only: bool = False) -> bool:
         """Serve only public dists/pool files from the active release."""
         prefix = "/repository/"
         if path == "/repository":
@@ -734,10 +759,17 @@ class RepositoryHandler(BaseHTTPRequestHandler):
         if not target.is_file():
             self._error(404, "repository file not found")
             return True
-        data = target.read_bytes()
-        content_type = mimetypes.guess_type(target.name)[0] or "application/octet-stream"
-        cache_control = "public, max-age=31536000, immutable" if "/pool/" in path and target.suffix == ".deb" else "no-cache, max-age=0, must-revalidate"
-        self._send(200, data, content_type, cache_control)
+        try:
+            with target.open("rb") as source:
+                self.send_response(200)
+                self.send_header("Content-Type", mimetypes.guess_type(target.name)[0] or "application/octet-stream")
+                self.send_header("Content-Length", str(os.fstat(source.fileno()).st_size))
+                self.send_header("Cache-Control", "no-store")
+                self.end_headers()
+                if not head_only:
+                    shutil.copyfileobj(source, self.wfile, 1024 * 1024)
+        except FileNotFoundError:
+            self._error(404, "repository file not found")
         return True
 
     def do_GET(self) -> None:
@@ -788,6 +820,26 @@ class RepositoryHandler(BaseHTTPRequestHandler):
         print(f"[mattos-repository] {format % args}", file=sys.stderr)
 
 
+class PublicRepositoryHandler(RepositoryHandler):
+    """Expose one archive at its APT URL root, without management routes."""
+
+    def do_GET(self) -> None:
+        self._serve_public(head_only=False)
+
+    def do_HEAD(self) -> None:
+        self._serve_public(head_only=True)
+
+    def do_POST(self) -> None:
+        self._error(405, "read-only repository")
+
+    def _serve_public(self, *, head_only: bool) -> None:
+        path = urlparse(self.path).path
+        if not path.startswith(("/dists/", "/pool/")):
+            self._error(404, "repository file not found")
+            return
+        repository = self.server.repository  # type: ignore[attr-defined]
+        self._serve_repository_file(f"/repositories/{repository}{path}", head_only=head_only)
+
 def create_server(configs: dict[str, ServerConfig], bind: str, port: int) -> ThreadingHTTPServer:
     validate_configs(configs)
     config = configs["mattos"]
@@ -806,14 +858,32 @@ def serve(configs: dict[str, ServerConfig], bind: str, port: int) -> None:
         server.serve_forever()
 
 
+def create_public_server(configs: dict[str, ServerConfig], repository: str, bind: str, port: int) -> ThreadingHTTPServer:
+    validate_configs(configs)
+    if repository not in REPOSITORIES:
+        raise RepositoryError(SELECTION_ERROR)
+    server = ThreadingHTTPServer((bind, port), PublicRepositoryHandler)
+    server.managers = {repository: RepositoryManager(configs[repository])}
+    server.repository = repository
+    return server
+
+
+def serve_public(configs: dict[str, ServerConfig], repository: str, bind: str, port: int) -> None:
+    with create_public_server(configs, repository, bind, port) as server:
+        print(f"{repository} public repository listening on {bind}:{port}")
+        server.serve_forever()
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Manage the MattOS and MattPackages Debian repositories")
     parser.add_argument("--repo", choices=REPOSITORIES, help="Required for every operation except starting the shared service")
     parser.add_argument("--config", type=Path, default=CONFIG_PATH)
     parser.add_argument("--root", type=Path, help="Override only the selected repository's local root")
     sub = parser.add_subparsers(dest="command", required=True)
-    for command in ("init", "setup", "status", "verify", "list", "publish", "token"):
+    for command in ("init", "status", "verify", "list", "publish", "token", "setup-public"):
         sub.add_parser(command)
+    setup = sub.add_parser("setup")
+    setup.add_argument("--publication", choices=("r2", "local"), help="Persist the selected repository's publication destination")
     for command in ("add", "upload"):
         add = sub.add_parser(command)
         add.add_argument("--no-overwrites", action="store_true", help="Reject packages already present with the same name, version, and architecture")
@@ -824,6 +894,9 @@ def main(argv: list[str] | None = None) -> int:
     api = sub.add_parser("serve")
     api.add_argument("--bind", default=os.environ.get("MATTOS_REPOSITORY_BIND", DEFAULT_BIND))
     api.add_argument("--port", type=int, default=int(os.environ.get("MATTOS_REPOSITORY_PORT", str(DEFAULT_PORT))))
+    public = sub.add_parser("serve-public")
+    public.add_argument("--bind", default="127.0.0.1")
+    public.add_argument("--port", type=int)
     args = parser.parse_args(argv)
     if args.command != "serve" and not args.repo:
         parser.error(SELECTION_ERROR)
@@ -834,7 +907,13 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "serve":
             serve(configs, args.bind, args.port)
             return 0
+        if args.command == "serve-public":
+            serve_public(configs, args.repo, args.bind, args.port or PUBLIC_PORTS[args.repo])
+            return 0
         config = configs[args.repo]
+        if args.command == "setup" and args.publication:
+            config = replace(config, r2_enabled=args.publication == "r2")
+            configs[args.repo] = config
         if args.root:
             root = args.root.expanduser().resolve()
             token_file = root / "api-token" if config.token_file == config.root / "api-token" else config.token_file
@@ -851,7 +930,10 @@ def main(argv: list[str] | None = None) -> int:
         elif args.command == "setup":
             setup_server(config, configs, args.config.resolve())
             print(json.dumps(manager.status(), indent=2, sort_keys=True))
-            print("Shared repository service configured; selected repository synchronized with R2.")
+            print("Shared repository service configured; selected repository " + ("synchronized with R2." if config.r2_enabled else "served locally without R2 publication."))
+        elif args.command == "setup-public":
+            install_public_service(args.config.resolve(), service_user(), args.repo)
+            print(f"{args.repo}: read-only repository service configured on 127.0.0.1:{PUBLIC_PORTS[args.repo]}.")
         elif args.command == "status": print(json.dumps(manager.status(), indent=2, sort_keys=True))
         elif args.command == "verify": manager.verify(); print(f"{args.repo}: repository verification passed.")
         elif args.command == "publish": manager.publish(); print(f"{args.repo}: repository published.")

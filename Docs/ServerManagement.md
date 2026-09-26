@@ -143,6 +143,35 @@ separate lock in each bucket. Public R2 uploads are incremental, not an atomic
 multi-object transaction. Normal synchronization never imports remote packages
 into an empty archive or restores the last package after explicit removal.
 
+### Serving packages from the home server
+
+The management API remains on the private Tailscale address. Separate read-only
+services can serve each archive at the root paths expected by APT:
+
+```bash
+sudo python3 Tools/ManageMattOSRepositoryServer.py --repo mattos setup-public
+sudo python3 Tools/ManageMattOSRepositoryServer.py --repo mattpackages setup-public
+```
+
+The services listen only on `127.0.0.1:8791` for MattOS and `127.0.0.1:8792`
+for MattPackages. They serve `GET` and `HEAD` requests for `dists/` and `pool/`
+only, with `Cache-Control: no-store`; they do not expose upload, key export, or
+other management routes. These local listeners can be published with separate
+Cloudflare Tunnel routes for the two package domains. Bypass Cloudflare caching
+for both hostnames when packages can be rebuilt under the same version.
+
+After both public domains serve and verify the local archives, stop R2
+publication for each repository while retaining its local archive:
+
+```bash
+sudo python3 Tools/ManageMattOSRepositoryServer.py --repo mattos setup --publication local
+sudo python3 Tools/ManageMattOSRepositoryServer.py --repo mattpackages setup --publication local
+```
+
+The publication setting is persisted in `server.json`. Use `--publication r2`
+with `setup` to restore R2 publication. Changing the destination does not
+delete existing R2 objects or buckets.
+
 The local HTTP server exposes `/repositories/mattos/dists/...` and
 `/repositories/mattpackages/dists/...` (and corresponding `pool/...` paths).
 The old public `/repository/...` path remains a MattOS download alias; it is not

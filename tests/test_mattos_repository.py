@@ -118,6 +118,22 @@ class RepositoryTests(unittest.TestCase):
         self.assertIn("--bind 100.1.2.3", unit)
         self.assertIn("MATTOS_REPOSITORY_ALLOW_ANONYMOUS=1", unit)
         self.assertNotIn("--repo", unit)
+        public_unit = backend.public_service_definition(Path("/etc/mattos-repository/server.json"), "matt", "mattpackages")
+        self.assertIn("--repo mattpackages", public_unit)
+        self.assertIn("serve-public --bind 127.0.0.1 --port 8792", public_unit)
+        self.assertNotIn("MATTOS_REPOSITORY_ALLOW_ANONYMOUS=1", public_unit)
+
+    def test_setup_can_persist_local_only_publication(self):
+        with tempfile.TemporaryDirectory() as directory:
+            configs = configurations(Path(directory))
+            configs["mattpackages"] = replace(configs["mattpackages"], r2_enabled=True)
+            with patch.object(backend, "load_configs", return_value=configs), patch.object(backend, "setup_server") as setup, \
+                 contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(backend.main(["--repo", "mattpackages", "setup", "--publication", "local"]), 0)
+            selected = setup.call_args.args[0]
+            self.assertFalse(selected.r2_enabled)
+            self.assertFalse(setup.call_args.args[1]["mattpackages"].r2_enabled)
+            self.assertFalse(configs["mattos"].r2_enabled)
 
     def test_mattpackages_never_generates_a_new_shared_key(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -169,12 +185,21 @@ class SignedHTTPTests(unittest.TestCase):
         cls.thread = threading.Thread(target=cls.server.serve_forever, daemon=True)
         cls.thread.start()
         cls.url = f"http://127.0.0.1:{cls.server.server_port}"
+        cls.public_servers = {name: backend.create_public_server(cls.configs, name, "127.0.0.1", 0) for name in client.REPOSITORIES}
+        cls.public_threads = [threading.Thread(target=server.serve_forever, daemon=True) for server in cls.public_servers.values()]
+        for thread in cls.public_threads:
+            thread.start()
 
     @classmethod
     def tearDownClass(cls):
         cls.server.shutdown()
         cls.server.server_close()
         cls.thread.join()
+        for server in cls.public_servers.values():
+            server.shutdown()
+            server.server_close()
+        for thread in cls.public_threads:
+            thread.join()
         cls.temporary.cleanup()
 
     def remote(self, name):
@@ -237,6 +262,9 @@ class SignedHTTPTests(unittest.TestCase):
 
     def test_03_same_version_upload_replaces_payload_unless_disabled(self):
         remote = self.remote("mattpackages")
+        neighbor = self.make_package("overwrite-neighbor")
+        neighbor_payload = neighbor.read_bytes()
+        remote.upload(neighbor)
         package = self.make_package("overwrite-example", description="first payload")
         first_payload = package.read_bytes()
         remote.upload(package)
@@ -261,11 +289,13 @@ class SignedHTTPTests(unittest.TestCase):
         new_pool = next((current / "pool").rglob("overwrite-example_1.0_amd64.deb"))
         self.assertNotEqual(current, previous)
         self.assertEqual(new_pool.read_bytes(), second_payload)
+        self.assertEqual(next((current / "pool").rglob("overwrite-neighbor_1.0_amd64.deb")).read_bytes(), neighbor_payload)
         self.assertEqual(old_pool.read_bytes(), first_payload)
         self.assertEqual([item for item in remote.request("GET", "/packages")["packages"] if item["name"] == "overwrite-example"],
                          [{"name": "overwrite-example", "version": "1.0", "architecture": "amd64"}])
         self.assertTrue(remote.request("GET", "/verify")["verified"])
         remote.remove("overwrite-example", "1.0")
+        remote.remove("overwrite-neighbor", "1.0")
 
     def test_04_public_routes_and_private_file_protection(self):
         for path in ("/repository/dists/trixie/InRelease", "/repositories/mattos/dists/trixie/InRelease", "/repositories/mattpackages/dists/stable/InRelease"):
@@ -275,6 +305,24 @@ class SignedHTTPTests(unittest.TestCase):
             with self.assertRaises(HTTPError) as error:
                 urlopen(self.url + path)
             self.assertEqual(error.exception.code, 404)
+            error.exception.close()
+
+    def test_04_read_only_public_server_uses_apt_root_paths(self):
+        for name, suite in (("mattos", "trixie"), ("mattpackages", "stable")):
+            url = f"http://127.0.0.1:{self.public_servers[name].server_port}"
+            with urlopen(url + f"/dists/{suite}/InRelease") as response:
+                self.assertIn(b"BEGIN PGP SIGNED MESSAGE", response.read())
+                self.assertEqual(response.headers["Cache-Control"], "no-store")
+            with urlopen(Request(url + f"/dists/{suite}/InRelease", method="HEAD")) as response:
+                self.assertEqual(response.status, 200)
+                self.assertEqual(response.read(), b"")
+            with self.assertRaises(HTTPError) as error:
+                urlopen(url + f"/v2/repos/{name}/private-key")
+            self.assertEqual(error.exception.code, 404)
+            error.exception.close()
+            with self.assertRaises(HTTPError) as error:
+                urlopen(Request(url + f"/v2/repos/{name}/upload", data=b"payload", method="POST"))
+            self.assertEqual(error.exception.code, 405)
             error.exception.close()
 
     def test_05_cli_operations_select_both_repositories(self):
