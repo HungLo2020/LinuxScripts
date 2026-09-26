@@ -241,6 +241,18 @@ def cloudflare_status(*, details: bool = False, item_name: str = CLOUDFLARE_ITEM
                 probe(f"{name}_r2_domains", f"/accounts/{account_id}/r2/buckets/{bucket}/domains/custom")
             for name, hostname in (("mattos", "packages.mattsherfey.com"), ("mattpackages", "mattpackages.mattsherfey.com")):
                 probe(f"{name}_dns", f"/zones/{zone_id}/dns_records?name={hostname}")
+                suite = "trixie" if name == "mattos" else "stable"
+                try:
+                    with urlopen(Request(f"https://{hostname}/dists/{suite}/InRelease"), timeout=10) as response:
+                        prefix = response.read(64)
+                        status[f"{name}_public_check"] = {
+                            "http_status": response.status,
+                            "origin": response.headers.get("X-MattOS-Repository-Origin", ""),
+                            "cache_status": response.headers.get("CF-Cache-Status", ""),
+                            "signed": b"BEGIN PGP SIGNED MESSAGE" in prefix,
+                        }
+                except (HTTPError, URLError, TimeoutError) as exc:
+                    status[f"{name}_public_check"] = f"unavailable ({getattr(exc, 'code', type(exc).__name__)})"
             probe("cache_rules", f"/zones/{zone_id}/rulesets/phases/http_request_cache_settings/entrypoint")
     return status
 
