@@ -30,7 +30,9 @@ from dataclasses import asdict, dataclass, replace
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
+from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse
+from urllib.request import Request, urlopen
 
 from server.r2_repository import R2Error
 
@@ -201,6 +203,17 @@ def cloudflare_status(*, details: bool = False) -> dict[str, Any]:
     if details:
         status["login_username"] = (item.get("login") or {}).get("username", "")
         status["notes"] = item.get("notes", "")
+        token = (item.get("login") or {}).get("password", "")
+        for label, path in (("accounts", "/accounts?per_page=50"), ("zones", "/zones?name=mattsherfey.com")):
+            request = Request("https://api.cloudflare.com/client/v4" + path,
+                              headers={"Authorization": f"Bearer {token}", "Accept": "application/json"})
+            try:
+                with urlopen(request, timeout=15) as response:
+                    payload = json.load(response)
+                status[label] = [{"id": entry.get("id"), "name": entry.get("name")}
+                                 for entry in payload.get("result", [])]
+            except (HTTPError, URLError, ValueError) as exc:
+                status[label] = f"unavailable ({getattr(exc, 'code', type(exc).__name__)})"
     return status
 
 
