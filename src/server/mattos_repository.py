@@ -227,6 +227,7 @@ def cloudflare_status(*, details: bool = False) -> dict[str, Any]:
                 probe(f"{name}_r2_domains", f"/accounts/{account_id}/r2/buckets/{bucket}/domains/custom")
             for name, hostname in (("mattos", "packages.mattsherfey.com"), ("mattpackages", "mattpackages.mattsherfey.com")):
                 probe(f"{name}_dns", f"/zones/{zone_id}/dns_records?name={hostname}")
+            probe("cache_rules", f"/zones/{zone_id}/rulesets/phases/http_request_cache_settings/entrypoint")
     return status
 
 
