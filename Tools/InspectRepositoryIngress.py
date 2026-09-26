@@ -37,6 +37,12 @@ def main() -> int:
         client = BitwardenClient(password_file=None)
         names = sorted({str(item.get("name")) for item in client.list_items("Cloudflare") if item.get("name")})
         print("Cloudflare Bitwarden item names: " + (", ".join(names) if names else "none found"))
+        item = client.item("MattPackages Cloudflare Setup", required=False)
+        if item:
+            fields = sorted(str(field.get("name")) for field in item.get("fields", []) if isinstance(field, dict) and field.get("name"))
+            print("MattPackages Cloudflare Setup field names: " + (", ".join(fields) if fields else "none"))
+            print(f"MattPackages Cloudflare Setup has login password: {bool((item.get('login') or {}).get('password'))}")
+            print(f"MattPackages Cloudflare Setup has notes: {bool(item.get('notes'))}")
     except BitwardenError as exc:
         print(f"Bitwarden inspection unavailable: {exc}", file=sys.stderr)
         return 1
