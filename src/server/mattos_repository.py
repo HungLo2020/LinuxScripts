@@ -243,7 +243,8 @@ def cloudflare_status(*, details: bool = False, item_name: str = CLOUDFLARE_ITEM
                 probe(f"{name}_dns", f"/zones/{zone_id}/dns_records?name={hostname}")
                 suite = "trixie" if name == "mattos" else "stable"
                 try:
-                    with urlopen(Request(f"https://{hostname}/dists/{suite}/InRelease"), timeout=10) as response:
+                    with urlopen(Request(f"https://{hostname}/dists/{suite}/InRelease",
+                                         headers={"User-Agent": "LinuxScripts/1.0"}), timeout=10) as response:
                         prefix = response.read(64)
                         status[f"{name}_public_check"] = {
                             "http_status": response.status,

@@ -218,7 +218,7 @@ class CloudflareIngress:
             try:
                 checks = []
                 for _check in range(2):
-                    with urlopen(Request(url), timeout=10) as response:
+                    with urlopen(Request(url, headers={"User-Agent": "LinuxScripts/1.0"}), timeout=10) as response:
                         header = response.headers.get("X-MattOS-Repository-Origin")
                         cache = response.headers.get("CF-Cache-Status", "").upper()
                         body = response.read(64)
