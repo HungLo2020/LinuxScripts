@@ -21,6 +21,7 @@ sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT / "GenericScripts"))
 from server import mattos_repository as backend
 from server.mattos_repository import RepositoryManager, ServerConfig
+from server.cloudflare_ingress import CloudflareIngress, CloudflareIngressError
 from server.r2_repository import R2Publisher, R2Error
 import ManageMattOSRepository as client
 
@@ -139,7 +140,7 @@ class RepositoryTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             configs = configurations(Path(directory))
             configs["mattpackages"] = replace(configs["mattpackages"], r2_enabled=True)
-            with patch.object(backend, "load_configs", return_value=configs), patch.object(backend, "setup_server") as setup, \
+            with patch.object(backend, "load_configs", return_value=configs), patch.object(backend, "setup_with_publication") as setup, \
                  contextlib.redirect_stdout(io.StringIO()):
                 self.assertEqual(backend.main(["--repo", "mattpackages", "setup", "--publication", "local"]), 0)
             selected = setup.call_args.args[0]
@@ -182,6 +183,17 @@ class RepositoryTests(unittest.TestCase):
                 save.assert_called_once_with(configs, path)
                 cleanup.assert_called_once_with()
                 self.assertEqual(service.call_args.args[0], path)
+
+    def test_local_setup_checks_cloudflare_before_changing_the_server(self):
+        with tempfile.TemporaryDirectory() as directory:
+            configs = configurations(Path(directory))
+            ingress = Mock()
+            ingress.preflight.side_effect = backend.CloudflareIngressError("Cloudflare zone unavailable")
+            with patch.object(backend.CloudflareIngress, "from_vault", return_value=ingress), \
+                 patch.object(backend, "setup_server") as setup:
+                with self.assertRaisesRegex(backend.CloudflareIngressError, "zone unavailable"):
+                    backend.setup_with_publication(configs["mattpackages"], configs, Path(directory) / "server.json")
+            setup.assert_not_called()
 
 
 class SignedHTTPTests(unittest.TestCase):
@@ -327,6 +339,8 @@ class SignedHTTPTests(unittest.TestCase):
             with urlopen(url + f"/dists/{suite}/InRelease") as response:
                 self.assertIn(b"BEGIN PGP SIGNED MESSAGE", response.read())
                 self.assertEqual(response.headers["Cache-Control"], "no-store")
+                self.assertEqual(response.headers["Cloudflare-CDN-Cache-Control"], "no-store")
+                self.assertEqual(response.headers["X-MattOS-Repository-Origin"], "home-server")
             with urlopen(Request(url + f"/dists/{suite}/InRelease", method="HEAD")) as response:
                 self.assertEqual(response.status, 200)
                 self.assertEqual(response.read(), b"")
@@ -439,6 +453,32 @@ class R2Tests(unittest.TestCase):
                 self.assertTrue(all(call.kwargs["Bucket"] == config.bucket for call in calls))
                 pool_upload = next(call for call in calls if call.args[0] == "put_object" and call.kwargs["Key"].endswith(".deb"))
                 self.assertEqual(pool_upload.kwargs["CacheControl"], "no-cache, max-age=0, must-revalidate")
+
+
+class CloudflareIngressTests(unittest.TestCase):
+    def test_cache_rule_permission_falls_back_to_origin_headers(self):
+        ingress = CloudflareIngress("test-token", Mock())
+        ingress.account_id = "account"
+        ingress.zone_id = "zone"
+        ingress.request = Mock(side_effect=CloudflareIngressError("HTTP 403"))
+        self.assertFalse(ingress.ensure_cache_rule("packages.mattsherfey.com", "mattos"))
+
+    def test_domain_switch_detaches_only_selected_r2_domain(self):
+        ingress = CloudflareIngress("test-token", Mock())
+        ingress.account_id = "account"
+        ingress.zone_id = "zone"
+        ingress.request = Mock(side_effect=[
+            {"domains": [{"domain": "mattpackages.mattsherfey.com"}]},
+            [{"id": "record", "type": "CNAME", "content": "public.r2.dev", "proxied": True}],
+            {"domain": "mattpackages.mattsherfey.com"},
+            [{"id": "record", "type": "CNAME", "content": "public.r2.dev", "proxied": True}],
+            {"id": "record"},
+        ])
+        ingress.switch_domain("mattpackages.mattsherfey.com", "mattpackages-apt-repo", "tunnel")
+        calls = ingress.request.call_args_list
+        self.assertEqual([call.args[0] for call in calls], ["GET", "GET", "DELETE", "GET", "PATCH"])
+        self.assertTrue(all("mattpackages" in call.args[1] or "dns_records" in call.args[1] for call in calls))
+        self.assertEqual(calls[-1].args[2]["content"], "tunnel.cfargotunnel.com")
 
 
 if __name__ == "__main__":

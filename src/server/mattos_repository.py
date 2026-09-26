@@ -35,6 +35,7 @@ from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
 from server.r2_repository import R2Error
+from server.cloudflare_ingress import CloudflareIngress, CloudflareIngressError
 
 
 REPOSITORIES = ("mattos", "mattpackages")
@@ -192,9 +193,11 @@ def cloudflare_status(*, details: bool = False) -> dict[str, Any]:
     """Report available vault configuration without exposing secret values."""
     from bitwarden import BitwardenClient
     password_file = Path(os.environ.get("MATTOS_BW_PASSWORD_FILE", str(Path.home() / "Documents/Repos/LinuxScripts/.bw_master_password"))).expanduser()
-    item = BitwardenClient(password_file=password_file, error_type=RepositoryError).item(CLOUDFLARE_ITEM)
+    vault = BitwardenClient(password_file=password_file, error_type=RepositoryError)
+    item = vault.item(CLOUDFLARE_ITEM)
     status = {
         "item": CLOUDFLARE_ITEM,
+        "cloudflare_items": sorted(str(entry.get("name")) for entry in vault.list_items("Cloudflare") if entry.get("name")),
         "fields": sorted(str(field.get("name")) for field in item.get("fields", []) if isinstance(field, dict) and field.get("name")),
         "has_login_username": bool((item.get("login") or {}).get("username")),
         "has_login_password": bool((item.get("login") or {}).get("password")),
@@ -722,6 +725,27 @@ def setup_server(config: ServerConfig, configs: dict[str, ServerConfig], config_
     install_service(config_path, user)
 
 
+def setup_with_publication(config: ServerConfig, configs: dict[str, ServerConfig], config_path: Path) -> None:
+    """Run central setup and migrate one public hostname when local is chosen."""
+    if config.r2_enabled:
+        setup_server(config, configs, config_path)
+        return
+    ingress = CloudflareIngress.from_vault(privileged)
+    hostnames = tuple(urlparse(item.public_url).hostname or "" for item in configs.values())
+    ingress.preflight(hostnames)
+    previous = load_configs(config_path)
+    setup_server(config, configs, config_path)
+    try:
+        ingress.provision(config.repository, configs, service_user())
+    except Exception:
+        # A failed migration must not leave subsequent uploads silently skipping
+        # the existing R2 destination. The domain may still be on either origin;
+        # both keep serving the same local archive until setup is retried.
+        save_configs(previous, config_path)
+        install_service(config_path, service_user())
+        raise
+
+
 class RepositoryHandler(BaseHTTPRequestHandler):
     server_version = "MattRepositories/2.0"
 
@@ -803,6 +827,8 @@ class RepositoryHandler(BaseHTTPRequestHandler):
                 self.send_header("Content-Type", mimetypes.guess_type(target.name)[0] or "application/octet-stream")
                 self.send_header("Content-Length", str(os.fstat(source.fileno()).st_size))
                 self.send_header("Cache-Control", "no-store")
+                self.send_header("Cloudflare-CDN-Cache-Control", "no-store")
+                self.send_header("X-MattOS-Repository-Origin", "home-server")
                 self.end_headers()
                 if not head_only:
                     shutil.copyfileobj(source, self.wfile, 1024 * 1024)
@@ -966,7 +992,7 @@ def main(argv: list[str] | None = None) -> int:
         elif args.command == "token": print(manager.ensure_token())
         elif args.command == "init": manager.init(); print(json.dumps(manager.status(), indent=2, sort_keys=True))
         elif args.command == "setup":
-            setup_server(config, configs, args.config.resolve())
+            setup_with_publication(config, configs, args.config.resolve())
             print(json.dumps(manager.status(), indent=2, sort_keys=True))
             print("Shared repository service configured; selected repository " + ("synchronized with R2." if config.r2_enabled else "served locally without R2 publication."))
         elif args.command == "status": print(json.dumps(manager.status(), indent=2, sort_keys=True))
@@ -984,7 +1010,7 @@ def main(argv: list[str] | None = None) -> int:
                 os.fchmod(handle.fileno(), 0o644 if args.command == "export-key" else 0o600)
                 handle.write(content)
         return 0
-    except (RepositoryError, R2Error, OSError) as exc:
+    except (RepositoryError, R2Error, CloudflareIngressError, OSError) as exc:
         print(f"Error: {exc}", file=sys.stderr); return 1
 
 

@@ -151,25 +151,35 @@ The management API remains on the private Tailscale address. The same managed
 service opens read-only APT listeners on `127.0.0.1:8791` for MattOS and
 `127.0.0.1:8792` for MattPackages. They serve `GET` and `HEAD` requests for
 `dists/` and `pool/` only, with `Cache-Control: no-store`; they do not expose
-upload, key export, or other management routes. These local listeners can be
-published with separate
-Cloudflare Tunnel routes for the two package domains. Bypass Cloudflare caching
-for both hostnames when packages can be rebuilt under the same version.
-The repository menu in `Tools/ServerManager.py` configures the listeners through
-its normal **setup** action. Select `local` at its publication prompt only after
-both public domains are serving from the home server.
+upload, key export, or other management routes.
 
-After both public domains serve and verify the local archives, stop R2
-publication for each repository while retaining its local archive:
+Run `Tools/Setup.py` as the server user, open **Server Manager**, choose
+**Debian repository management**, select a repository, and choose **setup**.
+At the publication prompt, select `local` to move that repository's public
+hostname from R2 to the home server. The same setup action installs the
+`cloudflared` connector, creates or updates one managed tunnel and its systemd
+service, adds a Cloudflare cache bypass rule when the token permits it, removes its R2
+custom-domain connection, updates DNS, and verifies the public signed archive.
+The Cloudflare API token comes from the `MattPackages Cloudflare Setup`
+Bitwarden item. The user running setup must be able to unlock that vault;
+privileged installation steps use `sudo` when needed. The token needs account
+Cloudflare Tunnel Edit, zone DNS Edit, and account Workers R2 Storage Write
+permissions. Cache Rules Edit allows setup to install an explicit bypass rule;
+without it, the origin sends `no-store` headers and setup checks the public
+response for caching. Setup checks Cloudflare access before changing
+the local publication setting.
+
+Alternatively, use the existing repository wrapper as the server user:
 
 ```bash
-sudo python3 Tools/ManageMattOSRepositoryServer.py --repo mattos setup --publication local
-sudo python3 Tools/ManageMattOSRepositoryServer.py --repo mattpackages setup --publication local
+python3 Tools/ManageMattOSRepositoryServer.py --repo mattos setup --publication local
+python3 Tools/ManageMattOSRepositoryServer.py --repo mattpackages setup --publication local
 ```
 
-The publication setting is persisted in `server.json`. Use `--publication r2`
-with `setup` to restore R2 publication. Changing the destination does not
-delete existing R2 objects or buckets.
+The publication setting is persisted in `server.json`. The tunnel can route
+both hostnames while each repository's publication setting remains independent.
+Changing to `local` does not delete existing R2 objects or buckets. Selecting
+`r2` later resumes R2 publication; it does not switch public DNS back to R2.
 
 The local HTTP server exposes `/repositories/mattos/dists/...` and
 `/repositories/mattpackages/dists/...` (and corresponding `pool/...` paths).
