@@ -540,7 +540,7 @@ class RepositoryManager:
             finally:
                 handle.close()
 
-    def add(self, package: Path) -> dict[str, str]:
+    def add(self, package: Path, *, no_overwrites: bool = False) -> dict[str, str]:
         package = package.resolve()
         if not package.is_file() or package.suffix != ".deb":
             raise RepositoryError("Upload must be a regular .deb file")
@@ -548,18 +548,30 @@ class RepositoryManager:
         if architecture != "all" and architecture not in self.config.architectures:
             raise RepositoryError(f"Package architecture {architecture} is not configured")
         with self._lock() as handle:
-            stage = Path(tempfile.mkdtemp(prefix="mattos-repository-", dir=self.releases))
             try:
-                self._stage_from_active(stage)
-                incoming = stage / ".incoming.deb"
-                shutil.copy2(package, incoming)
-                self._build(stage, [incoming])
-                incoming.unlink(missing_ok=True)
-                self._commit(stage)
-                self.synchronize_r2()
-            except Exception:
-                shutil.rmtree(stage, ignore_errors=True)
-                raise
+                active = self._active()
+                existing = sorted(active.rglob("*.deb")) if active else []
+                replacement = [path for path in existing if package_metadata(path) == (name, version, architecture)]
+                if replacement and no_overwrites:
+                    raise RepositoryError(f"Package already exists: {name} {version} ({architecture})")
+                stage = Path(tempfile.mkdtemp(prefix="mattos-repository-", dir=self.releases))
+                try:
+                    incoming = stage / ".incoming.deb"
+                    shutil.copy2(package, incoming)
+                    if replacement:
+                        # Rebuild without the old package so reprepro accepts a
+                        # different payload with the same version.
+                        retained = [path for path in existing if path not in replacement]
+                        self._build(stage, [*retained, incoming])
+                    else:
+                        self._stage_from_active(stage)
+                        self._build(stage, [incoming])
+                    incoming.unlink(missing_ok=True)
+                    self._commit(stage)
+                    self.synchronize_r2()
+                except Exception:
+                    shutil.rmtree(stage, ignore_errors=True)
+                    raise
             finally:
                 handle.close()
         return {"repository": self.config.repository, "name": name, "version": version, "architecture": architecture}
@@ -751,6 +763,8 @@ class RepositoryHandler(BaseHTTPRequestHandler):
             if path == "/upload":
                 length = int(self.headers.get("Content-Length", "0")); filename = self.headers.get("X-Package-Filename", "package.deb")
                 if Path(filename).name != filename or not filename.endswith(".deb") or length <= 0: return self._error(400, "invalid package upload")
+                no_overwrites = self.headers.get("X-No-Overwrites", "0")
+                if no_overwrites not in {"0", "1"}: return self._error(400, "invalid X-No-Overwrites header")
                 with tempfile.TemporaryDirectory(prefix="repository-upload-") as directory:
                     temporary = Path(directory) / filename
                     with temporary.open("wb") as output:
@@ -761,7 +775,7 @@ class RepositoryHandler(BaseHTTPRequestHandler):
                                 raise RepositoryError("incomplete package upload")
                             output.write(block)
                             remaining -= len(block)
-                    return self._send(200, self.manager.add(temporary))
+                    return self._send(200, self.manager.add(temporary, no_overwrites=no_overwrites == "1"))
             if path == "/remove":
                 length = int(self.headers.get("Content-Length", "0")); body = json.loads(self.rfile.read(length))
                 self.manager.remove(str(body["name"]), str(body["version"]) if body.get("version") else None); return self._send(200, {"repository": self.repository, "removed": True})
@@ -802,6 +816,7 @@ def main(argv: list[str] | None = None) -> int:
         sub.add_parser(command)
     for command in ("add", "upload"):
         add = sub.add_parser(command)
+        add.add_argument("--no-overwrites", action="store_true", help="Reject packages already present with the same name, version, and architecture")
         add.add_argument("package", type=Path)
     remove = sub.add_parser("remove"); remove.add_argument("name"); remove.add_argument("--version")
     for command in ("export-key", "export-private-key"):
@@ -842,7 +857,7 @@ def main(argv: list[str] | None = None) -> int:
         elif args.command == "publish": manager.publish(); print(f"{args.repo}: repository published.")
         elif args.command == "list":
             for item in manager.packages(): print(f"{item['name']}\t{item['version']}\t{item['architecture']}")
-        elif args.command in {"add", "upload"}: print(json.dumps(manager.add(args.package), sort_keys=True))
+        elif args.command in {"add", "upload"}: print(json.dumps(manager.add(args.package, no_overwrites=args.no_overwrites), sort_keys=True))
         elif args.command == "remove": manager.remove(args.name, args.version); print(f"{args.repo}: package removed.")
         elif args.command in {"export-key", "export-private-key"}:
             content = manager.public_key() if args.command == "export-key" else manager.private_key()

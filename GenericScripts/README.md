@@ -21,7 +21,13 @@ python3 GenericScripts/ManageMattOSRepository.py --repo mattpackages doctor
 python3 GenericScripts/ManageMattOSRepository.py --repo mattpackages status
 python3 GenericScripts/ManageMattOSRepository.py --repo mattpackages --dry-run upload package.deb
 python3 GenericScripts/ManageMattOSRepository.py --repo mattpackages upload package.deb
+python3 GenericScripts/ManageMattOSRepository.py --repo mattpackages upload --no-overwrites package.deb
 ```
+
+Uploads replace an existing package with the same name, version, and
+architecture by default. Pass `--no-overwrites` after `upload` or `add` to
+reject that collision. Reusing a version does not cause APT to upgrade an
+already installed package; increase the version for normal upgrades.
 
 Selection also applies to `init`, `add`, `remove`, `publish`, `verify`, and both
 key export commands. Omitting `--repo` fails clearly without performing an

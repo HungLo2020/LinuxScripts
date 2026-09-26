@@ -180,11 +180,11 @@ class SignedHTTPTests(unittest.TestCase):
     def remote(self, name):
         return client.ServerRepository(client.Config(repository=name, server_url=self.url, token_file=self.root / "token"))
 
-    def make_package(self, name, architecture="amd64"):
+    def make_package(self, name, architecture="amd64", description="Repository isolation test"):
         root = self.root / f"input-{name}-{architecture}"
         (root / "DEBIAN").mkdir(parents=True, exist_ok=True)
         (root / "DEBIAN/control").write_text(
-            f"Package: {name}\nVersion: 1.0\nPriority: optional\nArchitecture: {architecture}\nMaintainer: Test <test@example.invalid>\nDescription: Repository isolation test\n")
+            f"Package: {name}\nVersion: 1.0\nPriority: optional\nArchitecture: {architecture}\nMaintainer: Test <test@example.invalid>\nDescription: {description}\n")
         artifact = self.root / f"{name}_{architecture}.deb"
         subprocess.run(["dpkg-deb", "--build", str(root), str(artifact)], check=True, capture_output=True)
         return artifact
@@ -234,6 +234,38 @@ class SignedHTTPTests(unittest.TestCase):
             self.assertTrue(remote.request("GET", "/verify")["verified"])
             self.assertTrue(remote.request("POST", "/publish")["published"])
             self.assertEqual(remote.request("GET", "/status")["repository"], remote.config.repository)
+
+    def test_03_same_version_upload_replaces_payload_unless_disabled(self):
+        remote = self.remote("mattpackages")
+        package = self.make_package("overwrite-example", description="first payload")
+        first_payload = package.read_bytes()
+        remote.upload(package)
+        previous = RepositoryManager(self.configs["mattpackages"]).current.resolve()
+        old_pool = next((previous / "pool").rglob("overwrite-example_1.0_amd64.deb"))
+        self.assertEqual(old_pool.read_bytes(), first_payload)
+
+        package = self.make_package("overwrite-example", description="second payload")
+        second_payload = package.read_bytes()
+        self.assertNotEqual(first_payload, second_payload)
+        config = client.Config(repository="mattpackages", server_url=self.url, token_file=self.root / "token")
+        with patch.object(client.Config, "from_env", return_value=config), contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(client.main(["manager", "--repo", "mattpackages", "upload", "--no-overwrites", str(package)]), 40)
+        with patch.object(backend, "load_configs", return_value=self.configs), contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(backend.main(["--repo", "mattpackages", "upload", "--no-overwrites", str(package)]), 1)
+        self.assertEqual(RepositoryManager(self.configs["mattpackages"]).current.resolve(), previous)
+        self.assertEqual(old_pool.read_bytes(), first_payload)
+
+        with patch.object(client.Config, "from_env", return_value=config), contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(client.main(["manager", "--repo", "mattpackages", "upload", str(package)]), 0)
+        current = RepositoryManager(self.configs["mattpackages"]).current.resolve()
+        new_pool = next((current / "pool").rglob("overwrite-example_1.0_amd64.deb"))
+        self.assertNotEqual(current, previous)
+        self.assertEqual(new_pool.read_bytes(), second_payload)
+        self.assertEqual(old_pool.read_bytes(), first_payload)
+        self.assertEqual([item for item in remote.request("GET", "/packages")["packages"] if item["name"] == "overwrite-example"],
+                         [{"name": "overwrite-example", "version": "1.0", "architecture": "amd64"}])
+        self.assertTrue(remote.request("GET", "/verify")["verified"])
+        remote.remove("overwrite-example", "1.0")
 
     def test_04_public_routes_and_private_file_protection(self):
         for path in ("/repository/dists/trixie/InRelease", "/repositories/mattos/dists/trixie/InRelease", "/repositories/mattpackages/dists/stable/InRelease"):
@@ -333,6 +365,8 @@ class R2Tests(unittest.TestCase):
                 (config.root / "r2-credentials.json").write_text(json.dumps({"access_key": "test", "secret_key": "test", "endpoint": "https://r2.invalid", "bucket": config.bucket, "public_url": config.public_url}))
                 (config.root / "dists").mkdir()
                 (config.root / "dists/Release").write_text(name)
+                (config.root / "pool").mkdir()
+                (config.root / "pool/test.deb").write_bytes(b"package payload")
                 with patch.dict(sys.modules, {"boto3": boto}):
                     publisher = R2Publisher(config, Mock())
                 publisher.call = Mock()
@@ -341,6 +375,8 @@ class R2Tests(unittest.TestCase):
                 self.assertTrue(any(call.args[0] == "delete_object" for call in calls))
                 self.assertTrue(any(call.args[0] == "put_object" for call in calls))
                 self.assertTrue(all(call.kwargs["Bucket"] == config.bucket for call in calls))
+                pool_upload = next(call for call in calls if call.args[0] == "put_object" and call.kwargs["Key"].endswith(".deb"))
+                self.assertEqual(pool_upload.kwargs["CacheControl"], "no-cache, max-age=0, must-revalidate")
 
 
 if __name__ == "__main__":

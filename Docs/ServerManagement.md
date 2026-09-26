@@ -92,7 +92,15 @@ python3 GenericScripts/ManageMattOSRepository.py --repo mattpackages list
 python3 GenericScripts/ManageMattOSRepository.py --repo mattpackages status
 python3 GenericScripts/ManageMattOSRepository.py --repo mattpackages --dry-run upload package.deb
 python3 GenericScripts/ManageMattOSRepository.py --repo mattpackages upload package.deb
+python3 GenericScripts/ManageMattOSRepository.py --repo mattpackages upload --no-overwrites package.deb
 ```
+
+`upload` and `add` replace an existing package with the same name, version,
+and architecture by default. Put `--no-overwrites` after the subcommand to
+reject that collision instead. The server administration commands accept the
+same flag. APT will not upgrade an already installed package when its version
+is unchanged; increase the version for normal upgrades. Previously cached
+package URLs may retain old bytes until their cache expires or is purged.
 
 Every command requires `--repo mattos` or `--repo mattpackages`, including
 `doctor`, `init`, `add`/`upload`, `remove`, `publish`, `list`, `status`, `verify`,
