@@ -189,14 +189,14 @@ def remove_legacy_public_services() -> None:
         privileged(["systemctl", "daemon-reload"])
 
 
-def cloudflare_status(*, details: bool = False) -> dict[str, Any]:
+def cloudflare_status(*, details: bool = False, item_name: str = CLOUDFLARE_ITEM) -> dict[str, Any]:
     """Report available vault configuration without exposing secret values."""
     from bitwarden import BitwardenClient
     password_file = Path(os.environ.get("MATTOS_BW_PASSWORD_FILE", str(Path.home() / "Documents/Repos/LinuxScripts/.bw_master_password"))).expanduser()
     vault = BitwardenClient(password_file=password_file, error_type=RepositoryError)
-    item = vault.item(CLOUDFLARE_ITEM)
+    item = vault.item(item_name)
     status = {
-        "item": CLOUDFLARE_ITEM,
+        "item": item_name,
         "cloudflare_items": sorted(str(entry.get("name")) for entry in vault.list_items("Cloudflare") if entry.get("name")),
         "fields": sorted(str(field.get("name")) for field in item.get("fields", []) if isinstance(field, dict) and field.get("name")),
         "has_login_username": bool((item.get("login") or {}).get("username")),
@@ -206,6 +206,8 @@ def cloudflare_status(*, details: bool = False) -> dict[str, Any]:
     if details:
         status["login_username"] = (item.get("login") or {}).get("username", "")
         status["notes"] = item.get("notes", "")
+        if item_name != CLOUDFLARE_ITEM:
+            return status
         token = (item.get("login") or {}).get("password", "")
         def probe(label: str, path: str) -> None:
             request = Request("https://api.cloudflare.com/client/v4" + path,
@@ -957,6 +959,7 @@ def main(argv: list[str] | None = None) -> int:
         sub.add_parser(command)
     cloudflare = sub.add_parser("cloudflare-status")
     cloudflare.add_argument("--details", action="store_true")
+    cloudflare.add_argument("--item", default=CLOUDFLARE_ITEM)
     setup = sub.add_parser("setup")
     setup.add_argument("--publication", choices=("r2", "local"), help="Persist the selected repository's publication destination")
     for command in ("add", "upload"):
@@ -994,7 +997,7 @@ def main(argv: list[str] | None = None) -> int:
                     token_file=config.token_file)
             validate_configs(configs)
         manager = RepositoryManager(config)
-        if args.command == "cloudflare-status": print(json.dumps(cloudflare_status(details=args.details), indent=2, sort_keys=True))
+        if args.command == "cloudflare-status": print(json.dumps(cloudflare_status(details=args.details, item_name=args.item), indent=2, sort_keys=True))
         elif args.command == "token": print(manager.ensure_token())
         elif args.command == "init": manager.init(); print(json.dumps(manager.status(), indent=2, sort_keys=True))
         elif args.command == "setup":
