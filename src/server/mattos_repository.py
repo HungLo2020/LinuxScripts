@@ -186,18 +186,22 @@ def remove_legacy_public_services() -> None:
         privileged(["systemctl", "daemon-reload"])
 
 
-def cloudflare_status() -> dict[str, Any]:
+def cloudflare_status(*, details: bool = False) -> dict[str, Any]:
     """Report available vault configuration without exposing secret values."""
     from bitwarden import BitwardenClient
     password_file = Path(os.environ.get("MATTOS_BW_PASSWORD_FILE", str(Path.home() / "Documents/Repos/LinuxScripts/.bw_master_password"))).expanduser()
     item = BitwardenClient(password_file=password_file, error_type=RepositoryError).item(CLOUDFLARE_ITEM)
-    return {
+    status = {
         "item": CLOUDFLARE_ITEM,
         "fields": sorted(str(field.get("name")) for field in item.get("fields", []) if isinstance(field, dict) and field.get("name")),
         "has_login_username": bool((item.get("login") or {}).get("username")),
         "has_login_password": bool((item.get("login") or {}).get("password")),
         "has_notes": bool(item.get("notes")),
     }
+    if details:
+        status["login_username"] = (item.get("login") or {}).get("username", "")
+        status["notes"] = item.get("notes", "")
+    return status
 
 
 def run(command: list[str], *, cwd: Path | None = None, env: dict[str, str] | None = None) -> str:
@@ -890,8 +894,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--config", type=Path, default=CONFIG_PATH)
     parser.add_argument("--root", type=Path, help="Override only the selected repository's local root")
     sub = parser.add_subparsers(dest="command", required=True)
-    for command in ("init", "status", "verify", "list", "publish", "token", "cloudflare-status"):
+    for command in ("init", "status", "verify", "list", "publish", "token"):
         sub.add_parser(command)
+    cloudflare = sub.add_parser("cloudflare-status")
+    cloudflare.add_argument("--details", action="store_true")
     setup = sub.add_parser("setup")
     setup.add_argument("--publication", choices=("r2", "local"), help="Persist the selected repository's publication destination")
     for command in ("add", "upload"):
@@ -929,7 +935,7 @@ def main(argv: list[str] | None = None) -> int:
                     token_file=config.token_file)
             validate_configs(configs)
         manager = RepositoryManager(config)
-        if args.command == "cloudflare-status": print(json.dumps(cloudflare_status(), indent=2, sort_keys=True))
+        if args.command == "cloudflare-status": print(json.dumps(cloudflare_status(details=args.details), indent=2, sort_keys=True))
         elif args.command == "token": print(manager.ensure_token())
         elif args.command == "init": manager.init(); print(json.dumps(manager.status(), indent=2, sort_keys=True))
         elif args.command == "setup":
