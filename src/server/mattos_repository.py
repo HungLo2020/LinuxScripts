@@ -225,7 +225,7 @@ def cloudflare_status(*, details: bool = False, item_name: str = CLOUDFLARE_ITEM
                     payload = json.load(response)
                 result = payload.get("result", [])
                 if isinstance(result, dict):
-                    result = result.get("domains", [])
+                    result = result.get("domains", result.get("rules", []))
                 status[label] = [{key: entry.get(key) for key in ("id", "name", "domain", "type", "content", "status", "proxied") if key in entry}
                                  for entry in result]
             except (HTTPError, URLError, ValueError) as exc:
