@@ -245,6 +245,16 @@ def cloudflare_status(*, details: bool = False, item_name: str = CLOUDFLARE_ITEM
     return status
 
 
+def update_cloudflare_token() -> None:
+    """Store a replacement setup token in the existing vault login."""
+    from bitwarden import BitwardenClient
+    token = getpass.getpass("Cloudflare setup API token: ").strip()
+    if not token.startswith("cfat_"):
+        raise RepositoryError("Expected an account-owned Cloudflare API token (cfat_ prefix).")
+    password_file = Path(os.environ.get("MATTOS_BW_PASSWORD_FILE", str(Path.home() / "Documents/Repos/LinuxScripts/.bw_master_password"))).expanduser()
+    BitwardenClient(password_file=password_file, error_type=RepositoryError).update_login_password(CLOUDFLARE_ITEM, token)
+
+
 def run(command: list[str], *, cwd: Path | None = None, env: dict[str, str] | None = None) -> str:
     try:
         result = subprocess.run(command, cwd=cwd, env=env, text=True, capture_output=True, check=False)
@@ -969,6 +979,7 @@ def main(argv: list[str] | None = None) -> int:
     cloudflare = sub.add_parser("cloudflare-status")
     cloudflare.add_argument("--details", action="store_true")
     cloudflare.add_argument("--item", default=CLOUDFLARE_ITEM)
+    sub.add_parser("cloudflare-token-update")
     setup = sub.add_parser("setup")
     setup.add_argument("--publication", choices=("r2", "local"), help="Persist the selected repository's publication destination")
     for command in ("add", "upload"):
@@ -1007,6 +1018,7 @@ def main(argv: list[str] | None = None) -> int:
             validate_configs(configs)
         manager = RepositoryManager(config)
         if args.command == "cloudflare-status": print(json.dumps(cloudflare_status(details=args.details, item_name=args.item), indent=2, sort_keys=True))
+        elif args.command == "cloudflare-token-update": update_cloudflare_token(); print(f"Updated Bitwarden item {CLOUDFLARE_ITEM}.")
         elif args.command == "token": print(manager.ensure_token())
         elif args.command == "init": manager.init(); print(json.dumps(manager.status(), indent=2, sort_keys=True))
         elif args.command == "setup":
