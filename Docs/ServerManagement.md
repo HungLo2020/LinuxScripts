@@ -159,6 +159,8 @@ only, with `Cache-Control: no-store`; they do not expose upload, key export, or
 other management routes. These local listeners can be published with separate
 Cloudflare Tunnel routes for the two package domains. Bypass Cloudflare caching
 for both hostnames when packages can be rebuilt under the same version.
+Install the connector on the server with
+`sudo python3 Tools/SetupRepositoryTunnel.py` before configuring the tunnel.
 
 After both public domains serve and verify the local archives, stop R2
 publication for each repository while retaining its local archive:
