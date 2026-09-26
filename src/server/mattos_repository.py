@@ -204,16 +204,29 @@ def cloudflare_status(*, details: bool = False) -> dict[str, Any]:
         status["login_username"] = (item.get("login") or {}).get("username", "")
         status["notes"] = item.get("notes", "")
         token = (item.get("login") or {}).get("password", "")
-        for label, path in (("accounts", "/accounts?per_page=50"), ("zones", "/zones?name=mattsherfey.com")):
+        def probe(label: str, path: str) -> None:
             request = Request("https://api.cloudflare.com/client/v4" + path,
                               headers={"Authorization": f"Bearer {token}", "Accept": "application/json"})
             try:
                 with urlopen(request, timeout=15) as response:
                     payload = json.load(response)
-                status[label] = [{"id": entry.get("id"), "name": entry.get("name")}
-                                 for entry in payload.get("result", [])]
+                result = payload.get("result", [])
+                if isinstance(result, dict):
+                    result = result.get("domains", [])
+                status[label] = [{key: entry.get(key) for key in ("id", "name", "domain", "type", "content", "status", "proxied") if key in entry}
+                                 for entry in result]
             except (HTTPError, URLError, ValueError) as exc:
                 status[label] = f"unavailable ({getattr(exc, 'code', type(exc).__name__)})"
+        probe("accounts", "/accounts?per_page=50")
+        probe("zones", "/zones?name=mattsherfey.com")
+        accounts, zones = status["accounts"], status["zones"]
+        if isinstance(accounts, list) and len(accounts) == 1 and isinstance(zones, list) and len(zones) == 1:
+            account_id, zone_id = accounts[0]["id"], zones[0]["id"]
+            probe("tunnels", f"/accounts/{account_id}/cfd_tunnel?per_page=50")
+            for name, bucket in (("mattos", "matt-apt-repo"), ("mattpackages", "mattpackages-apt-repo")):
+                probe(f"{name}_r2_domains", f"/accounts/{account_id}/r2/buckets/{bucket}/domains/custom")
+            for name, hostname in (("mattos", "packages.mattsherfey.com"), ("mattpackages", "mattpackages.mattsherfey.com")):
+                probe(f"{name}_dns", f"/zones/{zone_id}/dns_records?name={hostname}")
     return status
 
 
