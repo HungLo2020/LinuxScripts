@@ -731,12 +731,18 @@ def setup_with_publication(config: ServerConfig, configs: dict[str, ServerConfig
         setup_server(config, configs, config_path)
         return
     ingress = CloudflareIngress.from_vault(privileged)
-    hostnames = tuple(urlparse(item.public_url).hostname or "" for item in configs.values())
-    ingress.preflight(hostnames)
+    hostnames = {name: urlparse(item.public_url).hostname or "" for name, item in configs.items()}
+    ingress.preflight(tuple(hostnames.values()))
+    tunnel_id, token = ingress.ensure_tunnel(hostnames)
+    try:
+        ingress.ensure_cache_rule(hostnames[config.repository], config.repository)
+    except CloudflareIngressError as exc:
+        if "HTTP 403" not in str(exc):
+            raise
     previous = load_configs(config_path)
     setup_server(config, configs, config_path)
     try:
-        ingress.provision(config.repository, configs, service_user())
+        ingress.provision(config.repository, configs, service_user(), tunnel_id, token)
     except Exception:
         # A failed migration must not leave subsequent uploads silently skipping
         # the existing R2 destination. The domain may still be on either origin;

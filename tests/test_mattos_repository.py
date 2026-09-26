@@ -188,10 +188,10 @@ class RepositoryTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             configs = configurations(Path(directory))
             ingress = Mock()
-            ingress.preflight.side_effect = backend.CloudflareIngressError("Cloudflare zone unavailable")
+            ingress.ensure_tunnel.side_effect = backend.CloudflareIngressError("Tunnel Edit permission missing")
             with patch.object(backend.CloudflareIngress, "from_vault", return_value=ingress), \
                  patch.object(backend, "setup_server") as setup:
-                with self.assertRaisesRegex(backend.CloudflareIngressError, "zone unavailable"):
+                with self.assertRaisesRegex(backend.CloudflareIngressError, "Tunnel Edit"):
                     backend.setup_with_publication(configs["mattpackages"], configs, Path(directory) / "server.json")
             setup.assert_not_called()
 
@@ -456,6 +456,13 @@ class R2Tests(unittest.TestCase):
 
 
 class CloudflareIngressTests(unittest.TestCase):
+    def test_tunnel_permission_error_names_the_vault_item(self):
+        ingress = CloudflareIngress("test-token", Mock())
+        ingress.account_id = "account"
+        ingress.request = Mock(side_effect=[[], CloudflareIngressError("HTTP 403")])
+        with self.assertRaisesRegex(CloudflareIngressError, "MattPackages Cloudflare Setup.*Tunnel Edit"):
+            ingress.ensure_tunnel({"mattos": "packages.mattsherfey.com"})
+
     def test_cache_rule_permission_falls_back_to_origin_headers(self):
         ingress = CloudflareIngress("test-token", Mock())
         ingress.account_id = "account"

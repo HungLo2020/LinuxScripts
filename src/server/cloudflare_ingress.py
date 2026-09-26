@@ -89,7 +89,6 @@ class CloudflareIngress:
 
     def preflight(self, hostnames: tuple[str, ...]) -> None:
         self.discover(hostnames)
-        self.request("GET", f"/accounts/{self.account_id}/cfd_tunnel?per_page=50")
 
     def ensure_cache_rule(self, hostname: str, repository: str) -> bool:
         endpoint = f"/zones/{self.zone_id}/rulesets/phases/http_request_cache_settings/entrypoint"
@@ -121,13 +120,23 @@ class CloudflareIngress:
         matches = [item for item in tunnels if item.get("name") == TUNNEL_NAME and not item.get("deleted_at")]
         if len(matches) > 1:
             raise CloudflareIngressError(f"Multiple tunnels named {TUNNEL_NAME}")
-        tunnel = matches[0] if matches else self.request("POST", endpoint, {"name": TUNNEL_NAME, "config_src": "cloudflare"})
+        try:
+            tunnel = matches[0] if matches else self.request("POST", endpoint, {"name": TUNNEL_NAME, "config_src": "cloudflare"})
+        except CloudflareIngressError as exc:
+            if "HTTP 403" in str(exc):
+                raise CloudflareIngressError(f"The Cloudflare API token in Bitwarden item {CLOUDFLARE_ITEM!r} needs account Cloudflare Tunnel Edit permission") from exc
+            raise
         tunnel_id = str(tunnel["id"])
         ingress = [{"hostname": hostname, "service": f"http://127.0.0.1:{PUBLIC_PORTS[name]}"}
                    for name, hostname in hostnames.items()]
         ingress.append({"service": "http_status:404"})
-        self.request("PUT", f"{endpoint}/{tunnel_id}/configurations", {"config": {"ingress": ingress}})
-        token = self.request("GET", f"{endpoint}/{tunnel_id}/token")
+        try:
+            self.request("PUT", f"{endpoint}/{tunnel_id}/configurations", {"config": {"ingress": ingress}})
+            token = self.request("GET", f"{endpoint}/{tunnel_id}/token")
+        except CloudflareIngressError as exc:
+            if "HTTP 403" in str(exc):
+                raise CloudflareIngressError(f"The Cloudflare API token in Bitwarden item {CLOUDFLARE_ITEM!r} needs account Cloudflare Tunnel Edit permission") from exc
+            raise
         if not isinstance(token, str) or not token:
             raise CloudflareIngressError("Cloudflare did not return a tunnel connector token")
         return tunnel_id, token
@@ -222,17 +231,10 @@ class CloudflareIngress:
             time.sleep(3)
         raise CloudflareIngressError(f"{hostname} did not serve a fresh signed archive from the home server")
 
-    def provision(self, repository: str, configs: dict[str, Any], user: str) -> None:
-        hostnames = {name: urlparse(config.public_url).hostname for name, config in configs.items()}
-        if any(host is None for host in hostnames.values()):
-            raise CloudflareIngressError("Repository public URLs must have hostnames")
-        hostname = hostnames[repository]
-        try:
-            self.ensure_cache_rule(hostname, repository)
-        except CloudflareIngressError as exc:
-            if "HTTP 403" not in str(exc):
-                raise
-        tunnel_id, token = self.ensure_tunnel(hostnames)
+    def provision(self, repository: str, configs: dict[str, Any], user: str, tunnel_id: str, token: str) -> None:
+        hostname = urlparse(configs[repository].public_url).hostname
+        if not hostname:
+            raise CloudflareIngressError("Repository public URL must have a hostname")
         self.install_connector(token, user)
         self.wait_for_tunnel(tunnel_id)
         self.switch_domain(hostname, configs[repository].bucket, tunnel_id)
