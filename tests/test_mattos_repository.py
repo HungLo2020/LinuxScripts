@@ -12,7 +12,7 @@ import sys
 import tempfile
 import threading
 import unittest
-from unittest.mock import Mock, patch
+from unittest.mock import MagicMock, Mock, patch
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
@@ -118,10 +118,22 @@ class RepositoryTests(unittest.TestCase):
         self.assertIn("--bind 100.1.2.3", unit)
         self.assertIn("MATTOS_REPOSITORY_ALLOW_ANONYMOUS=1", unit)
         self.assertNotIn("--repo", unit)
-        public_unit = backend.public_service_definition(Path("/etc/mattos-repository/server.json"), "matt", "mattpackages")
-        self.assertIn("--repo mattpackages", public_unit)
-        self.assertIn("serve-public --bind 127.0.0.1 --port 8792", public_unit)
-        self.assertNotIn("MATTOS_REPOSITORY_ALLOW_ANONYMOUS=1", public_unit)
+
+    def test_shared_service_starts_both_public_archives(self):
+        with tempfile.TemporaryDirectory() as directory:
+            configs = configurations(Path(directory))
+            api = MagicMock()
+            public = {name: MagicMock() for name in backend.REPOSITORIES}
+            api.__enter__.return_value = api
+            for server in public.values():
+                server.__enter__.return_value = server
+            with patch.object(backend, "create_server", return_value=api), \
+                 patch.object(backend, "create_public_server", side_effect=lambda _configs, name, _bind, _port: public[name]) as create_public:
+                backend.serve(configs, "127.0.0.1", 0)
+            self.assertEqual(create_public.call_count, 2)
+            for name in backend.REPOSITORIES:
+                create_public.assert_any_call(configs, name, "127.0.0.1", backend.PUBLIC_PORTS[name])
+                public[name].shutdown.assert_called_once()
 
     def test_setup_can_persist_local_only_publication(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -162,11 +174,13 @@ class RepositoryTests(unittest.TestCase):
             with patch.object(backend, "RepositoryManager") as manager, \
                  patch.object(backend, "install_dependencies"), patch.object(backend, "privileged"), \
                  patch.object(backend, "ensure_tree_permissions"), patch.object(backend, "save_configs") as save, \
-                 patch.object(backend, "provision_client_token"), patch.object(backend, "install_service") as service:
+                 patch.object(backend, "provision_client_token"), patch.object(backend, "remove_legacy_public_services") as cleanup, \
+                 patch.object(backend, "install_service") as service:
                 path = Path(directory) / "server.json"
                 backend.setup_server(configs["mattpackages"], configs, path)
                 manager.assert_called_once_with(configs["mattpackages"])
                 save.assert_called_once_with(configs, path)
+                cleanup.assert_called_once_with()
                 self.assertEqual(service.call_args.args[0], path)
 
 

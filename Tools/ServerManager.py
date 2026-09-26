@@ -112,7 +112,16 @@ def mattos_repository_action() -> int:
         if choice not in {str(index) for index in range(1, len(actions) + 1)}:
             print("Select a listed action; no operation was performed.")
             return 2
-        return mattos_repository_main(["--repo", repository, actions[int(choice) - 1]])
+        action = actions[int(choice) - 1]
+        arguments = ["--repo", repository, action]
+        if action == "setup":
+            publication = input("Publication (r2/local; Enter keeps the saved setting): ").strip().lower()
+            if publication not in {"", "r2", "local"}:
+                print("Enter r2 or local; no operation was performed.")
+                return 2
+            if publication:
+                arguments.extend(("--publication", publication))
+        return mattos_repository_main(arguments)
     except EOFError:
         return 0
 

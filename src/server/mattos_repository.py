@@ -10,6 +10,7 @@ written repository.
 from __future__ import annotations
 
 import argparse
+from contextlib import ExitStack
 import fcntl
 import getpass
 import importlib.util
@@ -23,6 +24,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from dataclasses import asdict, dataclass, replace
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -169,29 +171,18 @@ def install_service(config_path: Path, user: str) -> None:
     privileged(["systemctl", "enable", "--now", SERVICE_NAME])
 
 
-def public_service_definition(config_path: Path, user: str, repository: str) -> str:
-    script = Path(__file__).resolve().parents[2] / "Tools" / "ManageMattOSRepositoryServer.py"
-    return "\n".join((
-        "[Unit]", f"Description={repository} read-only Debian repository", "After=network-online.target", "Wants=network-online.target", "",
-        "[Service]", "Type=simple", f"User={user}", f"WorkingDirectory={script.parent.parent}",
-        f'ExecStart=/usr/bin/python3 "{script}" --repo {repository} --config "{config_path}" serve-public --bind 127.0.0.1 --port {PUBLIC_PORTS[repository]}',
-        "Restart=on-failure", "RestartSec=5", "", "[Install]", "WantedBy=multi-user.target", "",
-    ))
-
-
-def install_public_service(config_path: Path, user: str, repository: str) -> None:
-    name = PUBLIC_SERVICE_NAMES[repository]
-    path = Path("/etc/systemd/system") / name
-    with tempfile.NamedTemporaryFile("w", encoding="utf-8", prefix="mattos-repository-public-", suffix=".service", delete=False) as temporary:
-        temporary.write(public_service_definition(config_path, user, repository))
-        source = Path(temporary.name)
-    try:
-        privileged(["install", "-o", "root", "-g", "root", "-m", "0644", str(source), str(path)])
-    finally:
-        source.unlink(missing_ok=True)
-    privileged(["systemctl", "daemon-reload"])
-    privileged(["systemctl", "enable", name])
-    privileged(["systemctl", "restart", name])
+def remove_legacy_public_services() -> None:
+    """Replace the separately installed public units from the earlier rollout."""
+    removed = False
+    for name in PUBLIC_SERVICE_NAMES.values():
+        path = Path("/etc/systemd/system") / name
+        if path.exists():
+            privileged(["systemctl", "stop", name])
+            privileged(["systemctl", "disable", name])
+            privileged(["rm", "-f", str(path)])
+            removed = True
+    if removed:
+        privileged(["systemctl", "daemon-reload"])
 
 
 def run(command: list[str], *, cwd: Path | None = None, env: dict[str, str] | None = None) -> str:
@@ -681,6 +672,7 @@ def setup_server(config: ServerConfig, configs: dict[str, ServerConfig], config_
         config.token_file, config.credentials_file or config.root / "r2-credentials.json"))
     save_configs(configs, config_path)
     provision_client_token(manager.ensure_token(), user)
+    remove_legacy_public_services()
     install_service(config_path, user)
 
 
@@ -853,9 +845,18 @@ def create_server(configs: dict[str, ServerConfig], bind: str, port: int) -> Thr
 
 
 def serve(configs: dict[str, ServerConfig], bind: str, port: int) -> None:
-    with create_server(configs, bind, port) as server:
-        print(f"MattOS and MattPackages repository API listening on {bind}:{port}")
-        server.serve_forever()
+    with ExitStack() as stack:
+        server = stack.enter_context(create_server(configs, bind, port))
+        public_servers = [stack.enter_context(create_public_server(configs, name, "127.0.0.1", PUBLIC_PORTS[name]))
+                          for name in REPOSITORIES]
+        for public in public_servers:
+            threading.Thread(target=public.serve_forever, daemon=True).start()
+        print(f"MattOS and MattPackages repository API listening on {bind}:{port}; public archives on loopback ports 8791 and 8792")
+        try:
+            server.serve_forever()
+        finally:
+            for public in public_servers:
+                public.shutdown()
 
 
 def create_public_server(configs: dict[str, ServerConfig], repository: str, bind: str, port: int) -> ThreadingHTTPServer:
@@ -868,19 +869,13 @@ def create_public_server(configs: dict[str, ServerConfig], repository: str, bind
     return server
 
 
-def serve_public(configs: dict[str, ServerConfig], repository: str, bind: str, port: int) -> None:
-    with create_public_server(configs, repository, bind, port) as server:
-        print(f"{repository} public repository listening on {bind}:{port}")
-        server.serve_forever()
-
-
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Manage the MattOS and MattPackages Debian repositories")
     parser.add_argument("--repo", choices=REPOSITORIES, help="Required for every operation except starting the shared service")
     parser.add_argument("--config", type=Path, default=CONFIG_PATH)
     parser.add_argument("--root", type=Path, help="Override only the selected repository's local root")
     sub = parser.add_subparsers(dest="command", required=True)
-    for command in ("init", "status", "verify", "list", "publish", "token", "setup-public"):
+    for command in ("init", "status", "verify", "list", "publish", "token"):
         sub.add_parser(command)
     setup = sub.add_parser("setup")
     setup.add_argument("--publication", choices=("r2", "local"), help="Persist the selected repository's publication destination")
@@ -894,9 +889,6 @@ def main(argv: list[str] | None = None) -> int:
     api = sub.add_parser("serve")
     api.add_argument("--bind", default=os.environ.get("MATTOS_REPOSITORY_BIND", DEFAULT_BIND))
     api.add_argument("--port", type=int, default=int(os.environ.get("MATTOS_REPOSITORY_PORT", str(DEFAULT_PORT))))
-    public = sub.add_parser("serve-public")
-    public.add_argument("--bind", default="127.0.0.1")
-    public.add_argument("--port", type=int)
     args = parser.parse_args(argv)
     if args.command != "serve" and not args.repo:
         parser.error(SELECTION_ERROR)
@@ -906,9 +898,6 @@ def main(argv: list[str] | None = None) -> int:
         configs = load_configs(args.config)
         if args.command == "serve":
             serve(configs, args.bind, args.port)
-            return 0
-        if args.command == "serve-public":
-            serve_public(configs, args.repo, args.bind, args.port or PUBLIC_PORTS[args.repo])
             return 0
         config = configs[args.repo]
         if args.command == "setup" and args.publication:
@@ -931,9 +920,6 @@ def main(argv: list[str] | None = None) -> int:
             setup_server(config, configs, args.config.resolve())
             print(json.dumps(manager.status(), indent=2, sort_keys=True))
             print("Shared repository service configured; selected repository " + ("synchronized with R2." if config.r2_enabled else "served locally without R2 publication."))
-        elif args.command == "setup-public":
-            install_public_service(args.config.resolve(), service_user(), args.repo)
-            print(f"{args.repo}: read-only repository service configured on 127.0.0.1:{PUBLIC_PORTS[args.repo]}.")
         elif args.command == "status": print(json.dumps(manager.status(), indent=2, sort_keys=True))
         elif args.command == "verify": manager.verify(); print(f"{args.repo}: repository verification passed.")
         elif args.command == "publish": manager.publish(); print(f"{args.repo}: repository published.")

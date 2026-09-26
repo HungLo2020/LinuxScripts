@@ -44,10 +44,12 @@ status, listing, verification, and publication for either selected repository.
 
 Setup installs dependencies, initializes only the selected repository, saves both
 configurations to `/etc/mattos-repository/server.json`, and updates the shared
-service. It starts MattPackages as a signed empty archive. If its local archive
-is absent but its bucket already contains repository files, setup refuses to
-import or overwrite those files. Existing initialized archives are retained on
-repeated setup. Keep a backup of local repository state for disaster recovery.
+service. That service also serves both read-only APT archives on loopback; a
+separate public-service setup command is not needed. It starts MattPackages as
+a signed empty archive. If its local archive is absent but its bucket already
+contains repository files, setup refuses to import or overwrite those files.
+Existing initialized archives are retained on repeated setup. Keep a backup of
+local repository state for disaster recovery.
 
 The existing MattOS root, bucket, public URL, package contents, and key remain in
 use. If your existing server uses non-default paths or R2 settings, supply those
@@ -145,22 +147,17 @@ into an empty archive or restores the last package after explicit removal.
 
 ### Serving packages from the home server
 
-The management API remains on the private Tailscale address. Separate read-only
-services can serve each archive at the root paths expected by APT:
-
-```bash
-sudo python3 Tools/ManageMattOSRepositoryServer.py --repo mattos setup-public
-sudo python3 Tools/ManageMattOSRepositoryServer.py --repo mattpackages setup-public
-```
-
-The services listen only on `127.0.0.1:8791` for MattOS and `127.0.0.1:8792`
-for MattPackages. They serve `GET` and `HEAD` requests for `dists/` and `pool/`
-only, with `Cache-Control: no-store`; they do not expose upload, key export, or
-other management routes. These local listeners can be published with separate
+The management API remains on the private Tailscale address. The same managed
+service opens read-only APT listeners on `127.0.0.1:8791` for MattOS and
+`127.0.0.1:8792` for MattPackages. They serve `GET` and `HEAD` requests for
+`dists/` and `pool/` only, with `Cache-Control: no-store`; they do not expose
+upload, key export, or other management routes. These local listeners can be
+published with separate
 Cloudflare Tunnel routes for the two package domains. Bypass Cloudflare caching
 for both hostnames when packages can be rebuilt under the same version.
-Install the connector on the server with
-`sudo python3 Tools/SetupRepositoryTunnel.py` before configuring the tunnel.
+The repository menu in `Tools/ServerManager.py` configures the listeners through
+its normal **setup** action. Select `local` at its publication prompt only after
+both public domains are serving from the home server.
 
 After both public domains serve and verify the local archives, stop R2
 publication for each repository while retaining its local archive:
