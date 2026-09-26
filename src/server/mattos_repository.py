@@ -206,9 +206,16 @@ def cloudflare_status(*, details: bool = False, item_name: str = CLOUDFLARE_ITEM
     if details:
         status["login_username"] = (item.get("login") or {}).get("username", "")
         status["notes"] = item.get("notes", "")
-        if item_name != CLOUDFLARE_ITEM:
-            return status
         token = (item.get("login") or {}).get("password", "")
+        if item_name != CLOUDFLARE_ITEM:
+            request = Request("https://api.cloudflare.com/client/v4/user/tokens/verify",
+                              headers={"Authorization": f"Bearer {token}", "Accept": "application/json"})
+            try:
+                with urlopen(request, timeout=15) as response:
+                    status["api_token_status"] = json.load(response).get("result", {}).get("status")
+            except (HTTPError, URLError, ValueError) as exc:
+                status["api_token_status"] = f"unavailable ({getattr(exc, 'code', type(exc).__name__)})"
+            return status
         def probe(label: str, path: str) -> None:
             request = Request("https://api.cloudflare.com/client/v4" + path,
                               headers={"Authorization": f"Bearer {token}", "Accept": "application/json"})
@@ -224,6 +231,7 @@ def cloudflare_status(*, details: bool = False, item_name: str = CLOUDFLARE_ITEM
                 status[label] = f"unavailable ({getattr(exc, 'code', type(exc).__name__)})"
         probe("accounts", "/accounts?per_page=50")
         probe("zones", "/zones?name=mattsherfey.com")
+        probe("api_tokens", "/user/tokens?per_page=50")
         accounts, zones = status["accounts"], status["zones"]
         if isinstance(accounts, list) and len(accounts) == 1 and isinstance(zones, list) and len(zones) == 1:
             account_id, zone_id = accounts[0]["id"], zones[0]["id"]
