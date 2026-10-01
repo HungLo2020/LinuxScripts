@@ -341,6 +341,13 @@ class SignedHTTPTests(unittest.TestCase):
                 self.assertEqual(response.headers["Cache-Control"], "no-store")
                 self.assertEqual(response.headers["Cloudflare-CDN-Cache-Control"], "no-store")
                 self.assertEqual(response.headers["X-MattOS-Repository-Origin"], "home-server")
+            # APT percent-encodes "+" and "~" in package file names.
+            with urlopen(url + f"/dists/{suite}/In%52elease") as response:
+                self.assertIn(b"BEGIN PGP SIGNED MESSAGE", response.read())
+            with self.assertRaises(HTTPError) as error:
+                urlopen(url + f"/dists/{suite}/%2e%2e/%2e%2e/conf/distributions")
+            self.assertEqual(error.exception.code, 404)
+            error.exception.close()
             with urlopen(Request(url + f"/dists/{suite}/InRelease", method="HEAD")) as response:
                 self.assertEqual(response.status, 200)
                 self.assertEqual(response.read(), b"")

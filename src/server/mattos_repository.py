@@ -31,7 +31,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlparse
 from urllib.request import Request, urlopen
 
 from server.r2_repository import R2Error
@@ -844,6 +844,9 @@ class RepositoryHandler(BaseHTTPRequestHandler):
             relative = path.removeprefix(prefix)
         else:
             return False
+        # APT percent-encodes characters such as "+" and "~" in package
+        # versions (%2b, %7e); files are stored under their literal names.
+        relative = unquote(relative)
         if not relative.startswith(("dists/", "pool/")):
             self._error(404, "repository file not found")
             return True
