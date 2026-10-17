@@ -26,6 +26,28 @@ def load_setup_module():
 
 
 class SetupWorkflowTests(unittest.TestCase):
+    def test_storage_mount_is_offered_on_linux_and_mattos_apt(self):
+        setup = load_setup_module()
+        for platform in ("linux", "mattos"):
+            with self.subTest(platform=platform), patch.object(setup, "prompt_yes_no", return_value=True) as prompt, patch.object(
+                setup, "configure_interactively"
+            ) as configure:
+                setup.offer_storage_mount(platform, setup.PackageManager.APT)
+                prompt.assert_called_once()
+                configure.assert_called_once_with()
+
+    def test_storage_mount_decline_and_unsupported_hosts_do_not_configure(self):
+        setup = load_setup_module()
+        for platform, manager in (("linux", setup.PackageManager.APT), ("mattos", setup.PackageManager.APT),
+                                  ("linux", setup.PackageManager.DNF), ("windows", None)):
+            with self.subTest(platform=platform, manager=manager), patch.object(
+                setup, "prompt_yes_no", return_value=False
+            ) as prompt, patch.object(setup, "configure_interactively") as configure:
+                setup.offer_storage_mount(platform, manager)
+                configure.assert_not_called()
+                if manager is not setup.PackageManager.APT:
+                    prompt.assert_not_called()
+
     def test_mattpackages_decline_and_unsupported_hosts_do_not_configure(self):
         setup = load_setup_module()
         for platform, manager, problem in (("linux", setup.PackageManager.APT, None), ("linux", setup.PackageManager.APT, "arm64 unsupported"), ("linux", setup.PackageManager.DNF, None), ("windows", None, None)):

@@ -91,9 +91,9 @@ def choose_profile(profiles) -> str | None:
 
 
 def offer_storage_mount(platform_name: str, package_manager: PackageManager | None) -> None:
-    """Offer the Linux/APT-only persistent SMB mount after package installation."""
+    """Offer the persistent SMB mount on Linux and MattOS APT hosts."""
 
-    if platform_name != "linux" or package_manager is not PackageManager.APT:
+    if platform_name not in {"linux", "mattos"} or package_manager is not PackageManager.APT:
         return
     if not prompt_yes_no("Configure the persistent Tailscale SMB storage mount?"):
         return
