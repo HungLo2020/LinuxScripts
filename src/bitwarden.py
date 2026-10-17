@@ -31,6 +31,30 @@ class BitwardenClient:
         self.non_interactive = non_interactive
         self.error_type = error_type
         self.ready = False
+        self._command_prefix: tuple[str, ...] | None = None
+
+    def command_prefix(self) -> tuple[str, ...]:
+        """Use the native CLI when available, otherwise Bitwarden's bundled Flatpak CLI."""
+
+        if self._command_prefix is not None:
+            return self._command_prefix
+        if shutil.which("bw") is not None:
+            self._command_prefix = ("bw",)
+        elif shutil.which("flatpak") is not None:
+            try:
+                result = subprocess.run(
+                    ("flatpak", "info", "com.bitwarden.desktop"),
+                    text=True,
+                    capture_output=True,
+                    check=False,
+                )
+            except OSError as error:
+                self.fail(f"Could not inspect Bitwarden Flatpak: {error}")
+            if result.returncode == 0:
+                self._command_prefix = ("flatpak", "run", "--command=bw", "com.bitwarden.desktop")
+        if self._command_prefix is None:
+            self.fail("Bitwarden CLI is unavailable. Install bw or the com.bitwarden.desktop Flatpak.")
+        return self._command_prefix
 
     def fail(self, message: str) -> None:
         raise self.error_type(message)
@@ -44,6 +68,8 @@ class BitwardenClient:
         capture_output: bool = True,
         check: bool = True,
     ) -> subprocess.CompletedProcess[str]:
+        if command and command[0] == "bw":
+            command = (*self.command_prefix(), *command[1:])
         try:
             result = subprocess.run(
                 command,
@@ -95,8 +121,7 @@ class BitwardenClient:
     def ensure_session(self) -> None:
         if self.ready:
             return
-        if shutil.which("bw") is None:
-            self.fail("Bitwarden CLI (bw) is not installed or is not on PATH.")
+        self.command_prefix()
         status = self.status()
         if status == "unlocked":
             self.ready = True

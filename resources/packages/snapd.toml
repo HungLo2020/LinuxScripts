@@ -14,6 +14,3 @@ id = "snapd"
 
 [targets.linux.zypper]
 id = "snapd"
-
-[targets.mattos.apt]
-id = "snapd"

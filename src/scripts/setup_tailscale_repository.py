@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Install the official Tailscale APT source for Debian and Ubuntu hosts."""
+"""Use MattOS's native Tailscale package or configure its official APT source."""
 
 from __future__ import annotations
 
@@ -43,6 +43,9 @@ def install_file(destination: str, contents: bytes) -> None:
 def main() -> int:
     values = os_release()
     distribution = values.get("ID", "")
+    if distribution == "mattos":
+        print("Using Tailscale from the configured MattOS APT repositories.")
+        return 0
     codename = values.get("VERSION_CODENAME", "")
     if distribution not in {"debian", "ubuntu"} or not codename:
         raise RuntimeError("The official Tailscale APT source requires a Debian or Ubuntu VERSION_CODENAME.")

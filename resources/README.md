@@ -21,12 +21,15 @@ delete_packages = ["unwanted-package"]
 
 `delete_packages` contains native provider identifiers, not logical package resource names. It is currently supported for guarded APT removal and runs after profile installations. See [../Docs/PackageManagement.md](../Docs/PackageManagement.md) for the complete schema.
 
-Packages can declare Python `before` and `after` hooks for source setup, authentication, and service configuration. Tailscale uses these hooks to configure its APT source and complete `tailscale up`; RustDesk uses them to download its official `.deb` and configure unattended direct-IP access.
+Packages can declare Python `before` and `after` hooks for source setup, authentication, and service configuration. Tailscale uses these hooks to select its native MattOS repository or configure its official Linux APT source, enable the service, and offer `tailscale up`; RustDesk uses them to download its official `.deb` and configure unattended direct-IP access.
 
 Profiles can declare `script_dependencies` in a platform table when a setup
 script should run only on that platform. These scripts are planned and applied
-before package-provider operations, without installing a package. For example,
-MattOS desktop setup uses this mechanism for COSMIC wallpaper configuration.
+before package-provider operations, without installing a package.
+
+On MattOS, the Bitwarden GUI and CLI logical packages share the
+`com.bitwarden.desktop` Flatpak. Flatpak install commands deduplicate identical
+application IDs for each remote. MattOS has no Snap targets or wallpaper hooks.
 
 ## Packages
 

@@ -65,6 +65,13 @@ python3 Tools/Setup.py apply desktop --yes
 | `complete-desktop` | Desktop, coding, gaming, and office profiles. |
 | `server` | Base, command-line utilities, authentication, and server software without GUI utilities. |
 
+On MattOS, Bitwarden's GUI and bundled CLI come from its Flatpak; Snap is not
+installed. LinuxScripts' Bitwarden helpers automatically use the Flatpak CLI
+when native `bw` is unavailable. Tailscale is included by `utilities` on both
+Linux and MattOS, using MattOS's native repository on MattOS. Desktop setup
+leaves MattOS's Plasma wallpapers unchanged. See
+[Package Management](Docs/PackageManagement.md#mattos) for details and CLI usage.
+
 ## Layout
 
 - [Tools/README.md](Tools/README.md): user-facing package, server, container, and KDE profile tools.

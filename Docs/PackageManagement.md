@@ -79,8 +79,8 @@ Platform sections can declare the same `script_dependencies` field when a setup
 script should run only for that platform:
 
 ```toml
-[platforms.mattos]
-script_dependencies = ["configure_cosmic_wallpapers.py"]
+[platforms.linux]
+script_dependencies = ["hello_world.py"]
 ```
 
 Platform scripts are included in the plan only when that platform is selected.
@@ -98,7 +98,7 @@ after = []
 
 Script paths are relative to `src/scripts/`. They are shown by `plan`, then run only during `apply --yes` with the project Python interpreter. Package installs without hooks remain batched; a package with hooks gets its own provider operation so its declared order is preserved.
 
-`utilities` is a shared command-line profile included by both `desktop` and `server`. On Linux it installs Tailscale through its official APT source and enables `tailscaled`. It skips enrollment when the device is already connected; otherwise it asks for explicit confirmation before opening interactive `tailscale up` authentication. `gui-utilities` is Linux-only and supplies desktop applications, RustDesk unattended/direct-IP configuration, and cleanup of unwanted KDE desktop applications; it is included by `desktop`, but never by `server`. RustDesk obtains its permanent password from the `PCPassword` Bitwarden item by default, or prompts when unavailable; set `BITWARDEN_RUSTDESK_ITEM` to use another item. `base` currently removes unwanted legacy games on Linux, so that cleanup applies to every Linux profile stack. `auth` is also included by `desktop` and `server`, and installs Bitwarden plus the `bw` command-line client on every supported platform.
+`utilities` is a shared command-line profile included by both `desktop` and `server`. It installs Tailscale on Linux and MattOS and enables `tailscaled`. Linux uses the official Tailscale APT source; MattOS uses its configured native APT repositories and does not add an external Tailscale source. It skips enrollment when the device is already connected; otherwise it asks for explicit confirmation before opening interactive `tailscale up` authentication. `gui-utilities` is Linux-only and supplies desktop applications, RustDesk unattended/direct-IP configuration, and cleanup of unwanted KDE desktop applications; it is included by `desktop`, but never by `server`. RustDesk obtains its permanent password from the `PCPassword` Bitwarden item by default, or prompts when unavailable; set `BITWARDEN_RUSTDESK_ITEM` to use another item. `base` currently removes unwanted legacy games on Linux, so that cleanup applies to every Linux profile stack. `auth` is also included by `desktop` and `server`, and installs Bitwarden plus its command-line client on every supported platform.
 
 On Linux, `base` also installs `openssh-server` and enables/starts the `ssh` service after installation. The Linux-only `variety` package installs the bundled `resources/variety.conf` into the invoking user's `~/.config/variety/variety.conf` after APT installs Variety.
 
@@ -107,6 +107,23 @@ The Linux-only `konsave` package is installed by the declarative `pipx` provider
 ## MattOS
 
 MattOS is detected when its `/etc/os-release` declares `ID=mattos`. It is an APT-based platform, but it does not inherit generic Linux profile sections or package targets. Every MattOS-specific profile package and package target must be declared explicitly.
+
+MattOS does not install Snap or `snapd`. The `auth` profile installs
+`com.bitwarden.desktop` from Flathub once for both the GUI and the bundled CLI.
+The shared Bitwarden client uses a native `bw` when available, otherwise it runs
+the installed Flatpak CLI as documented by [Bitwarden](https://bitwarden.com/help/cli/):
+
+```bash
+flatpak run --command=bw com.bitwarden.desktop status
+```
+
+This fallback supports LinuxScripts authentication and backup tools without a
+shell alias, a separate CLI download, or Node.js. The Flatpak CLI is currently
+included for `x86_64`, MattOS's supported architecture. Generic Linux targets
+retain their existing Snap-based Bitwarden installation.
+
+MattOS desktop setup leaves Plasma's wallpaper configuration to the OS. It does
+not write settings for other desktop environments or change existing wallpapers.
 
 ```toml
 [platforms.mattos]

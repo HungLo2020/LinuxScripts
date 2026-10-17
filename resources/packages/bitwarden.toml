@@ -7,9 +7,10 @@ depends_on = []
 id = "bitwarden"
 depends_on = ["snapd"]
 
-[targets.mattos.snap]
-id = "bitwarden"
-depends_on = ["snapd"]
+[targets.mattos.flatpak]
+id = "com.bitwarden.desktop"
+remote = "flathub"
+depends_on = ["flatpak"]
 
 [targets.windows.winget]
 id = "Bitwarden.Bitwarden"

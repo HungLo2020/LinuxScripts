@@ -70,7 +70,9 @@ def _flatpak_operation(packages: list[ResolvedPackage]) -> ProviderOperation:
     by_remote: OrderedDict[str, list[str]] = OrderedDict()
     for package in packages:
         remote = package.target.options.get("remote", "flathub")
-        by_remote.setdefault(remote, []).append(package.target.identifier)
+        identifiers = by_remote.setdefault(remote, [])
+        if package.target.identifier not in identifiers:
+            identifiers.append(package.target.identifier)
 
     for remote, identifiers in by_remote.items():
         remote_url = _FLATPAK_REMOTES.get(remote)

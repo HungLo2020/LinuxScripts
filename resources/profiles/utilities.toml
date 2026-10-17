@@ -8,3 +8,7 @@ optional_packages = []
 [platforms.linux]
 required_packages = ["fastfetch", "tailscale"]
 optional_packages = []
+
+[platforms.mattos]
+required_packages = ["tailscale"]
+optional_packages = []

@@ -9,3 +9,6 @@ after = ["configure_tailscale.py"]
 
 [targets.linux.apt]
 id = "tailscale"
+
+[targets.mattos.apt]
+id = "tailscale"

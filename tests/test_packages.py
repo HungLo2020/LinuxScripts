@@ -4,6 +4,7 @@ import tempfile
 import unittest
 import importlib.util
 import json
+from dataclasses import replace
 from io import StringIO
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -69,7 +70,7 @@ class PackagePlanningTests(unittest.TestCase):
         plan = resolve_profiles(["complete-desktop"], self.catalog, self.profiles, "mattos", ("apt",))
         self.assertEqual(
             [package.name for package in plan.packages],
-            ["git", "curl", "ripgrep", "snapd", "bitwarden", "bw", "flatpak", "discord", "github-cli", "codex-cli", "basalt"],
+            ["git", "curl", "ripgrep", "tailscale", "flatpak", "bitwarden", "bw", "discord", "github-cli", "codex-cli", "basalt"],
         )
         platforms_by_package = {package.name: package.target.platform for package in plan.packages}
         self.assertEqual(platforms_by_package["basalt"], "mattos")
@@ -77,13 +78,43 @@ class PackagePlanningTests(unittest.TestCase):
         self.assertNotIn("qdirstat", platforms_by_package)
         self.assertNotIn("steam", platforms_by_package)
         self.assertNotIn("libreoffice", platforms_by_package)
-        self.assertIn("configure_cosmic_wallpapers.py", plan.profile_scripts)
+        self.assertEqual(plan.profile_scripts, ("hello_world.py",))
+        self.assertFalse(any(target.platform == "mattos" and target.provider == "snap"
+                             for package in self.catalog.values() for target in package.targets))
+        self.assertFalse(any(target.platform == "mattos" for target in self.catalog["snapd"].targets))
+
+    def test_mattos_desktop_uses_one_bitwarden_flatpak_for_gui_and_cli(self):
+        plan = resolve_profiles(["desktop"], self.catalog, self.profiles, "mattos", ("apt",))
+        clients = [package for package in plan.packages if package.name in {"bitwarden", "bw"}]
+        self.assertEqual(len(clients), 2)
+        self.assertTrue(all(package.target.provider == "flatpak" for package in clients))
+        steps = plan_execution_steps(plan.packages, plan.profile_scripts, PackageManager.APT)
+        installs = [command.argv for step in steps for command in getattr(step, "commands", ())
+                    if command.argv[:3] == ("flatpak", "install", "-y")]
+        self.assertEqual(installs, [("flatpak", "install", "-y", "flathub", "com.bitwarden.desktop", "com.discordapp.Discord")])
+        self.assertNotIn("snapd", [package.name for package in plan.packages])
+        self.assertEqual(plan.profile_scripts, ())
 
     def test_platform_profile_scripts_are_excluded_on_other_platforms(self):
-        mattos_plan = resolve_profiles(["desktop"], self.catalog, self.profiles, "mattos", ("apt",))
-        linux_plan = resolve_profiles(["desktop"], self.catalog, self.profiles, "linux", ("apt",))
-        self.assertEqual(mattos_plan.profile_scripts, ("configure_cosmic_wallpapers.py",))
+        profiles = dict(self.profiles)
+        profiles["desktop"] = replace(profiles["desktop"], platform_script_dependencies={"mattos": ("hello_world.py",)})
+        mattos_plan = resolve_profiles(["desktop"], self.catalog, profiles, "mattos", ("apt",))
+        linux_plan = resolve_profiles(["desktop"], self.catalog, profiles, "linux", ("apt",))
+        self.assertEqual(mattos_plan.profile_scripts, ("hello_world.py",))
         self.assertEqual(linux_plan.profile_scripts, ())
+
+    def test_tailscale_is_in_desktop_and_server_profiles_on_linux_and_mattos(self):
+        for platform in ("linux", "mattos"):
+            for profile in ("desktop", "server"):
+                with self.subTest(platform=platform, profile=profile):
+                    plan = resolve_profiles([profile], self.catalog, self.profiles, platform, ("apt",))
+                    tailscale = next(package for package in plan.packages if package.name == "tailscale")
+                    self.assertEqual(tailscale.target.provider, "apt")
+                    self.assertEqual(tailscale.target.platform, platform)
+                    steps = plan_execution_steps(plan.packages, plan.profile_scripts, PackageManager.APT)
+                    index = next(i for i, step in enumerate(steps) if getattr(step, "packages", ()) == ("tailscale",))
+                    self.assertEqual(steps[index - 1].script, "setup_tailscale_repository.py")
+                    self.assertEqual(steps[index + 1].script, "configure_tailscale.py")
 
     def test_mattos_is_detected_as_an_apt_platform(self):
         platform_name = detect_package_platform(
@@ -323,21 +354,37 @@ class PackagePlanningTests(unittest.TestCase):
         self.assertEqual(destination.name, "variety.conf")
         self.assertEqual(destination.parent.name, "variety")
 
-    def test_cosmic_wallpaper_hook_writes_native_settings(self):
-        configure_cosmic = load_setup_script("configure_cosmic_wallpapers.py")
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            home = root / "home"
-            account = type("Account", (), {"pw_dir": str(home), "pw_uid": 1000, "pw_gid": 1000})()
-            wallpaper_directory = Path("/mnt/storage/OneDrive/Media/Wallpapers/Wide")
-            configure_cosmic.configure(home, wallpaper_directory, account)
+    def test_tailscale_repository_hook_uses_mattos_without_external_sources(self):
+        setup_tailscale = load_setup_script("setup_tailscale_repository.py")
+        with patch.object(setup_tailscale, "os_release", return_value={"ID": "mattos"}), patch.object(
+            setup_tailscale, "download"
+        ) as download, patch.object(setup_tailscale, "install_file") as install_file:
+            self.assertEqual(setup_tailscale.main(), 0)
+        download.assert_not_called()
+        install_file.assert_not_called()
 
-            background = home / ".config/cosmic/com.system76.CosmicBackground/v1/all"
-            current_folder = home / ".config/cosmic/com.system76.CosmicSettings.Wallpaper/v1/current-folder"
-            recent_folders = home / ".config/cosmic/com.system76.CosmicSettings.Wallpaper/v1/recent-folders"
-            self.assertIn('source: Path("/mnt/storage/OneDrive/Media/Wallpapers/Wide")', background.read_text(encoding="utf-8"))
-            self.assertEqual(current_folder.read_text(encoding="utf-8"), 'Some("/mnt/storage/OneDrive/Media/Wallpapers/Wide")')
-            self.assertEqual(json.loads(recent_folders.read_text(encoding="utf-8")), [str(wallpaper_directory)])
+    def test_tailscale_repository_hook_retains_official_debian_and_ubuntu_sources(self):
+        setup_tailscale = load_setup_script("setup_tailscale_repository.py")
+        for distribution, codename in (("debian", "trixie"), ("ubuntu", "noble")):
+            with self.subTest(distribution=distribution), patch.object(
+                setup_tailscale, "os_release", return_value={"ID": distribution, "VERSION_CODENAME": codename}
+            ), patch.object(setup_tailscale, "download", return_value=b"repository data") as download, patch.object(
+                setup_tailscale, "install_file"
+            ) as install_file:
+                self.assertEqual(setup_tailscale.main(), 0)
+                base = f"https://pkgs.tailscale.com/stable/{distribution}/{codename}"
+                self.assertEqual([call.args[0] for call in download.call_args_list],
+                                 [f"{base}.noarmor.gpg", f"{base}.tailscale-keyring.list"])
+                self.assertEqual(install_file.call_count, 2)
+
+    def test_tailscale_repository_hook_rejects_unknown_distributions(self):
+        setup_tailscale = load_setup_script("setup_tailscale_repository.py")
+        with patch.object(setup_tailscale, "os_release", return_value={"ID": "unknown"}), patch.object(
+            setup_tailscale, "download"
+        ) as download:
+            with self.assertRaisesRegex(RuntimeError, "requires a Debian or Ubuntu"):
+                setup_tailscale.main()
+        download.assert_not_called()
 
     def test_tailscale_hook_skips_interactive_enrollment_when_connected(self):
         configure_tailscale = load_tailscale_configure_script()

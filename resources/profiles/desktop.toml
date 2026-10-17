@@ -8,6 +8,3 @@ optional_packages = []
 [platforms.linux]
 required_packages = ["variety", "papirus-icon-theme"]
 optional_packages = []
-
-[platforms.mattos]
-script_dependencies = ["configure_cosmic_wallpapers.py"]
