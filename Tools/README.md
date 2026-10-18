@@ -47,6 +47,19 @@ python3 Tools/Setup.py apply complete-desktop --yes
 
 See [../Docs/PackageManagement.md](../Docs/PackageManagement.md) for profile schema, providers, and platform behavior.
 
+## Remote Development
+
+`RemoteDev.py` opens a persistent tmux session in a repository on `hunglosvr` over Tailscale SSH. It lists the directories in `/home/matt/Documents/Repos/` on the server and prompts for one; pressing Enter accepts `MattOS`. Pass a repository name to skip the menu, or `--host` to target another server:
+
+```bash
+python3 Tools/RemoteDev.py
+python3 Tools/RemoteDev.py LinuxScripts
+```
+
+After selection, the session opens in a new, detached terminal window (Konsole first, then other common emulators) and the launching terminal is released immediately. Closing either window is safe: the window only disconnects, and the tmux session keeps running on the server. Without a graphical session, or with `--here`, it connects in the current terminal instead.
+
+Each repository gets its own tmux session (`tmux new-session -A`), started in that repository's directory, so reconnecting resumes where you left off. When the SSH connection drops, the tool retries with backoff until it reconnects or you press Ctrl-C. Detaching (`Ctrl-b d`) or exiting tmux closes the window without reconnecting; a window that ends with an error waits for Enter so the message stays readable. It uses only the standard library and the system `ssh`, and requires tmux on the server.
+
 ## KDE Profiles
 
 `save_konsave_profile.py` exports the active KDE configuration to `resources/KDEProfiles/`. It can optionally synchronize exports to GitHub Releases:
