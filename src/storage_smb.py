@@ -137,6 +137,22 @@ def retire_legacy_implementation(user: str, active_credentials: Path) -> None:
         sudo(("rm", "-f", str(legacy_credentials)))
 
 
+def install_mount_ordering(mount_point: str) -> None:
+    """Keep Tailscale running until the actual CIFS mount has unmounted."""
+
+    unit = subprocess.run(
+        ("systemd-escape", "--path", "--suffix=mount", mount_point),
+        text=True, capture_output=True, check=True,
+    ).stdout.strip()
+    # Ordering the helper alone is insufficient: stopping it leaves CIFS mounted.
+    # systemd reverses After= during shutdown, so the mount stops first.
+    write_root_file(
+        SERVICE_PATH.parent / f"{unit}.d" / "tailscale.conf",
+        "[Unit]\nAfter=tailscaled.service\n",
+        "0644",
+    )
+
+
 def service_contents() -> str:
     """Return the retrying systemd service definition for the CIFS helper."""
 
@@ -178,6 +194,7 @@ def configure_interactively() -> None:
     retire_legacy_implementation(user, credentials_path)
     install_helper()
     write_root_file(SERVICE_PATH, service_contents(), "0644")
+    install_mount_ordering(configuration.mount_point)
     sudo(("systemctl", "daemon-reload"))
     sudo(("systemctl", "reset-failed", SERVICE_NAME), check=False)
     sudo(("systemctl", "enable", SERVICE_NAME))

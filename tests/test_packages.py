@@ -20,7 +20,7 @@ from packages.models import NodejsOperation, PackageDefinition, PackageTarget, P
 from packages.planner import PackageResolutionError, resolve_profiles
 from packages.providers import plan_execution_steps, plan_provider_operations, preferred_provider
 from server.btrfs_snapshots import BtrfsSnapshotManager
-from storage_smb import LEGACY_HELPER_PATH, MountConfiguration, install_prerequisites, mount_from_config, retire_legacy_implementation, service_contents, sudo
+from storage_smb import LEGACY_HELPER_PATH, MountConfiguration, install_mount_ordering, install_prerequisites, mount_from_config, retire_legacy_implementation, service_contents, sudo
 from host import HostPlatform
 from system import LinuxDistro, PackageManager, detect_package_platform
 from konsave.apply import choose_profile
@@ -415,6 +415,19 @@ class PackagePlanningTests(unittest.TestCase):
         self.assertIn(("systemctl", "disable", "--now", "storage-smb-mount.service"), commands)
         self.assertIn(("rm", "-f", str(LEGACY_HELPER_PATH)), commands)
         self.assertNotIn(("rm", "-f", "/etc/samba/credentials-storage-matt"), commands)
+
+    def test_storage_mount_orders_actual_mount_before_tailscale_shutdown(self):
+        for mount_point, unit in (
+            ("/mnt/storage", "mnt-storage.mount"),
+            ("/mnt/my-storage", r"mnt-my\x2dstorage.mount"),
+        ):
+            with self.subTest(mount_point=mount_point), patch("storage_smb.write_root_file") as write_file:
+                install_mount_ordering(mount_point)
+            write_file.assert_called_once_with(
+                Path("/etc/systemd/system") / f"{unit}.d" / "tailscale.conf",
+                "[Unit]\nAfter=tailscaled.service\n",
+                "0644",
+            )
 
     def test_storage_mount_privilege_wrapper_allows_nonfatal_commands(self):
         with patch("storage_smb.subprocess.run") as run_command:
