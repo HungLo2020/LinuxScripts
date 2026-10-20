@@ -109,6 +109,13 @@ class ShellInstallerOperation:
 
     packages: tuple[str, ...]
     urls: tuple[str, ...]
+    interpreters: tuple[str, ...] = ()
+
+    @property
+    def resolved_interpreters(self) -> tuple[str, ...]:
+        """Return one interpreter per installer, defaulting to sh."""
+
+        return self.interpreters or ("sh",) * len(self.packages)
 
 
 @dataclass(frozen=True)

@@ -62,7 +62,7 @@ class PackagePlanningTests(unittest.TestCase):
             [
                 "git", "curl", "ripgrep", "openssh-server", "fastfetch", "tailscale", "qdirstat", "baobab", "kate", "konsole", "dolphin",
                 "flatpak", "mission-center", "rustdesk", "snapd", "bitwarden", "bw", "discord", "variety", "papirus-icon-theme",
-                "github-cli", "codex-cli", "vscode", "kmines", "steam", "libreoffice", "pipx", "konsave",
+                "github-cli", "codex-cli", "vscode", "opencode", "kmines", "steam", "libreoffice", "pipx", "konsave",
             ],
         )
 
@@ -70,7 +70,7 @@ class PackagePlanningTests(unittest.TestCase):
         plan = resolve_profiles(["complete-desktop"], self.catalog, self.profiles, "mattos", ("apt",))
         self.assertEqual(
             [package.name for package in plan.packages],
-            ["git", "curl", "ripgrep", "tailscale", "flatpak", "bitwarden", "bw", "discord", "github-cli", "codex-cli", "basalt"],
+            ["git", "curl", "ripgrep", "tailscale", "flatpak", "bitwarden", "bw", "discord", "github-cli", "codex-cli", "opencode", "basalt"],
         )
         platforms_by_package = {package.name: package.target.platform for package in plan.packages}
         self.assertEqual(platforms_by_package["basalt"], "mattos")
@@ -199,7 +199,21 @@ class PackagePlanningTests(unittest.TestCase):
         self.assertEqual(codex.target.provider, "shell_installer")
         self.assertNotIn("npm", [package.name for package in plan.packages])
         steps = plan_execution_steps(plan.packages, plan.profile_scripts, PackageManager.APT)
-        self.assertIn(ShellInstallerOperation(("codex-cli",), ("https://chatgpt.com/codex/install.sh",)), steps)
+        self.assertIn(ShellInstallerOperation(("codex-cli",), ("https://chatgpt.com/codex/install.sh",), ("sh",)), steps)
+
+    def test_coding_uses_the_opencode_v2_bash_installer_on_linux_and_mattos(self):
+        for platform in ("linux", "mattos"):
+            with self.subTest(platform=platform):
+                plan = resolve_profiles(["coding"], self.catalog, self.profiles, platform, ("apt",))
+                opencode = next(package for package in plan.packages if package.name == "opencode")
+                self.assertEqual(opencode.target.provider, "shell_installer")
+                self.assertEqual(opencode.target.identifier, "https://opencode.ai/v2/install")
+                self.assertEqual(opencode.target.options["interpreter"], "bash")
+                steps = plan_execution_steps(plan.packages, plan.profile_scripts, PackageManager.APT)
+                self.assertIn(
+                    ShellInstallerOperation(("opencode",), ("https://opencode.ai/v2/install",), ("bash",)),
+                    steps,
+                )
 
     def test_nodesource_candidate_detection_uses_the_selected_version(self):
         self.assertTrue(
@@ -257,6 +271,25 @@ class PackagePlanningTests(unittest.TestCase):
         command = run_command.call_args.args[0]
         self.assertEqual(command[0], "sh")
         self.assertFalse(Path(command[1]).exists())
+
+    def test_shell_installer_honors_the_bash_interpreter(self):
+        url = "https://example.com/install.sh"
+        response = MagicMock()
+        response.geturl.return_value = url
+        response.read.side_effect = (b"echo installed\n", b"")
+        download = MagicMock()
+        download.__enter__.return_value = response
+        with patch("packages.executor.urlopen", return_value=download), patch(
+            "packages.executor.run_command"
+        ) as run_command:
+            run_shell_installer(url, "bash")
+        command = run_command.call_args.args[0]
+        self.assertEqual(command[0], "bash")
+        self.assertFalse(Path(command[1]).exists())
+
+    def test_shell_installer_rejects_an_unknown_interpreter(self):
+        with self.assertRaisesRegex(RuntimeError, "Unsupported shell installer interpreter"):
+            run_shell_installer("https://example.com/install.sh", "python")
 
     def test_command_plan_builds_from_the_source_cli_module(self):
         root = Path(__file__).resolve().parents[1]
@@ -488,6 +521,12 @@ class PackagePlanningTests(unittest.TestCase):
                 "[package]\nname = 'insecure'\n\n[targets.linux.shell_installer]\nid = 'http://example.com/install.sh'\n",
                 encoding="utf-8",
             )
+            invalid_interpreter_path = root / "invalid-interpreter.toml"
+            invalid_interpreter_path.write_text(
+                "[package]\nname = 'invalid-interpreter'\n\n[targets.linux.shell_installer]\n"
+                "id = 'https://example.com/install.sh'\ninterpreter = 'python'\n",
+                encoding="utf-8",
+            )
             profile_path = root / "invalid-profile.toml"
             profile_path.write_text(
                 "[profile]\nname = 'invalid'\nrequired_packages = []\noptional_packages = []\n\n[platforms.linix]\nrequired_packages = []\noptional_packages = []\n",
@@ -499,6 +538,8 @@ class PackagePlanningTests(unittest.TestCase):
                 load_profile(profile_path)
             with self.assertRaisesRegex(ValueError, "must be an HTTPS URL"):
                 load_package(insecure_installer_path)
+            with self.assertRaisesRegex(ValueError, "option 'interpreter' must be one of"):
+                load_package(invalid_interpreter_path)
 
     def test_unknown_profile_is_rejected(self):
         with self.assertRaises(PackageResolutionError):

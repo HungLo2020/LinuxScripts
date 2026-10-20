@@ -79,8 +79,13 @@ def print_plan(host, platform_name, package_manager, package_plan, operations) -
             continue
         if isinstance(operation, ShellInstallerOperation):
             print(f"  shell_installer: {', '.join(operation.packages)}")
-            for package, url in zip(operation.packages, operation.urls, strict=True):
-                print(f"    Run shell installer for '{package}': {url}")
+            for package, url, interpreter in zip(
+                operation.packages,
+                operation.urls,
+                operation.resolved_interpreters,
+                strict=True,
+            ):
+                print(f"    Run {interpreter} installer for '{package}': {url}")
             continue
         print(f"  {operation.provider}: {', '.join(operation.packages)}")
         for command in operation.commands:

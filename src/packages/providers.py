@@ -153,6 +153,7 @@ def _shell_installer_operation(packages: list[ResolvedPackage]) -> ShellInstalle
     return ShellInstallerOperation(
         tuple(package.name for package in packages),
         tuple(package.target.identifier for package in packages),
+        tuple(package.target.options.get("interpreter", "sh") for package in packages),
     )
 
 

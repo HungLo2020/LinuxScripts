@@ -21,7 +21,7 @@ delete_packages = ["unwanted-package"]
 
 `delete_packages` contains native provider identifiers, not logical package resource names. It is currently supported for guarded APT removal and runs after profile installations. See [../Docs/PackageManagement.md](../Docs/PackageManagement.md) for the complete schema.
 
-Packages can declare Python `before` and `after` hooks for source setup, authentication, and service configuration. Tailscale uses these hooks to select its native MattOS repository or configure its official Linux APT source, enable the service, and offer `tailscale up`; RustDesk uses them to download its official `.deb` and configure unattended direct-IP access.
+Packages can declare Python `before` and `after` hooks for source setup, authentication, and service configuration. Tailscale uses these hooks to select its native MattOS repository or configure its official Linux APT source, enable the service, and offer `tailscale up`; RustDesk uses them to download its official `.deb` and configure unattended direct-IP access. Shell-installer targets can set `interpreter = "bash"` when an upstream installer is bash-specific; OpenCode 2 uses this on Linux and MattOS.
 
 Profiles can declare `script_dependencies` in a platform table when a setup
 script should run only on that platform. These scripts are planned and applied

@@ -7,5 +7,9 @@ optional_packages = []
 script_dependencies = ["hello_world.py"]
 
 [platforms.linux]
-required_packages = ["vscode"]
+required_packages = ["vscode", "opencode"]
+optional_packages = []
+
+[platforms.mattos]
+required_packages = ["opencode"]
 optional_packages = []

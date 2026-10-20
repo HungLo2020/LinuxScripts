@@ -133,10 +133,12 @@ def _validate_shell_installer_url(url: str) -> None:
         raise RuntimeError("Shell installer URLs must use HTTPS and cannot include embedded credentials.")
 
 
-def run_shell_installer(url: str) -> None:
+def run_shell_installer(url: str, interpreter: str = "sh") -> None:
     """Download an HTTPS installer to a private file and execute it as the current user."""
 
     _validate_shell_installer_url(url)
+    if interpreter not in {"sh", "bash"}:
+        raise RuntimeError(f"Unsupported shell installer interpreter: '{interpreter}'.")
     installer_path: Path | None = None
     try:
         request = Request(url, headers={"User-Agent": _SHELL_INSTALLER_USER_AGENT})
@@ -149,7 +151,7 @@ def run_shell_installer(url: str) -> None:
                     installer_file.write(chunk)
         if installer_path.stat().st_size == 0:
             raise RuntimeError(f"Shell installer download was empty: {url}")
-        run_command(("sh", str(installer_path)))
+        run_command((interpreter, str(installer_path)))
     finally:
         if installer_path is not None:
             installer_path.unlink(missing_ok=True)
@@ -191,9 +193,14 @@ def execute_operations(operations: Iterable[ProviderOperation | NodejsOperation 
                 continue
             if isinstance(operation, ShellInstallerOperation):
                 print(f"Provider: shell_installer ({', '.join(operation.packages)})")
-                for package, url in zip(operation.packages, operation.urls, strict=True):
-                    print(f"  Run shell installer for '{package}': {url}")
-                    run_shell_installer(url)
+                for package, url, interpreter in zip(
+                    operation.packages,
+                    operation.urls,
+                    operation.resolved_interpreters,
+                    strict=True,
+                ):
+                    print(f"  Run {interpreter} installer for '{package}': {url}")
+                    run_shell_installer(url, interpreter)
                 continue
             _prepare_provider(operation.provider)
             print(f"Provider: {operation.provider} ({', '.join(operation.packages)})")

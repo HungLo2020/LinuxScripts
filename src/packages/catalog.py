@@ -16,7 +16,9 @@ _PROVIDERS = {"apt", "apt_deb", "dnf", "pacman", "zypper", "apk", "flatpak", "pi
 _PROVIDER_OPTIONS = {
     "flatpak": {"remote"},
     "homebrew": {"kind"},
+    "shell_installer": {"interpreter"},
 }
+_SHELL_INSTALLER_INTERPRETERS = {"sh", "bash"}
 
 
 def _validate_keys(value: dict[str, Any], allowed: set[str], label: str) -> None:
@@ -93,6 +95,12 @@ def load_package(path: Path) -> PackageDefinition:
                 raise ValueError(f"Package '{name}' target '{platform_name}.{provider_name}' needs an id.")
             if provider_name == "shell_installer":
                 _validate_shell_installer_url(target["id"], f"Package '{name}' target '{platform_name}.{provider_name}' id")
+                interpreter = target.get("interpreter", "sh")
+                if interpreter not in _SHELL_INSTALLER_INTERPRETERS:
+                    raise ValueError(
+                        f"Package '{name}' target '{platform_name}.{provider_name}' option 'interpreter' must be one of: "
+                        + ", ".join(sorted(_SHELL_INSTALLER_INTERPRETERS))
+                    )
             allowed_target_keys = {"id", "depends_on", *_PROVIDER_OPTIONS.get(provider_name, set())}
             _validate_keys(target, allowed_target_keys, f"Package '{name}' target '{platform_name}.{provider_name}'")
             for option in _PROVIDER_OPTIONS.get(provider_name, set()):
