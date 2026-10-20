@@ -1,0 +1,12 @@
+[package]
+name = "opencode"
+description = "OpenCode AI coding agent"
+depends_on = ["curl"]
+
+[targets.linux.shell_installer]
+id = "https://opencode.ai/v2/install"
+interpreter = "bash"
+
+[targets.mattos.shell_installer]
+id = "https://opencode.ai/v2/install"
+interpreter = "bash"
