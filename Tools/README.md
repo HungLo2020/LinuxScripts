@@ -83,3 +83,13 @@ python3 Tools/AIManager.py --update
 ```
 
 It needs Python 3 and `ssh` locally, an SSH connection to `hunglosvr`, and Docker access on the server. The update pulls the latest Ollama image and recreates its container using the server checkout at `/home/matt/Documents/Repos/LinuxScripts`; its persistent model data is retained. It does not manage Forge image models. The project launcher automatically restores its configured default Ollama model when run normally if that model was deleted.
+
+## OpenCode with server models
+
+On each laptop or desktop, connect to Tailscale and run:
+
+```bash
+python3 Tools/SetupOpenCodeAI.py
+```
+
+This configures OpenCode v2's global Ollama provider to discover models at `http://hunglosvr:11434/v1`, preserving other JSON settings. Reload or restart OpenCode and choose a model with `/models`. Re-run the script if needed; models are discovered from Ollama rather than hard-coded. The script respects `XDG_CONFIG_HOME` and leaves an existing `opencode.jsonc` untouched. Project or custom settings can override the global configuration.
