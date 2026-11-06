@@ -428,7 +428,7 @@ class OllamaWorkload(Workload):
     description = "Ollama and Open WebUI"
     ollama_name = "ollama"
     webui_name = "open-webui"
-    ollama_image = "ollama/ollama:0.34.4"
+    ollama_image = "ollama/ollama:latest"
     webui_image = "ghcr.io/open-webui/open-webui:main"
     network = "ai-stack"
     model = "hf.co/ccharnkij/Qwen3.5-9B-Uncensored-GGUF:Q4_K_M"

@@ -70,3 +70,16 @@ python3 Tools/save_konsave_profile.py --name MyProfile --upload
 ```
 
 On Linux, the declarative `konsave` package installs Konsave through `pipx`, then offers to download published `.knsv` profiles from GitHub Releases and select one to import/apply. The save tool uses that package-managed Konsave executable; it does not install or update Konsave itself.
+
+## Remote AI model management
+
+`AIManager.py` uses SSH to manage the Ollama container on `hunglosvr`:
+
+```bash
+python3 Tools/AIManager.py --list
+python3 Tools/AIManager.py --install deepseek-r1:8b
+python3 Tools/AIManager.py --delete deepseek-r1:8b
+python3 Tools/AIManager.py --update
+```
+
+It needs Python 3 and `ssh` locally, an SSH connection to `hunglosvr`, and Docker access on the server. The update pulls the latest Ollama image and recreates its container using the server checkout at `/home/matt/Documents/Repos/LinuxScripts`; its persistent model data is retained. It does not manage Forge image models. The project launcher automatically restores its configured default Ollama model when run normally if that model was deleted.
