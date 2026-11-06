@@ -432,6 +432,7 @@ class OllamaWorkload(Workload):
     webui_image = "ghcr.io/open-webui/open-webui:main"
     network = "ai-stack"
     model = "hf.co/ccharnkij/Qwen3.5-9B-Uncensored-GGUF:Q4_K_M"
+    keep_alive = "OLLAMA_KEEP_ALIVE=5m"
     root = Path.home() / ".ollama-stack"
     webui_environment = (
         "ENABLE_IMAGE_GENERATION=true",
@@ -481,7 +482,7 @@ class OllamaWorkload(Workload):
         gpu = nvidia_gpu_available(docker)
         if gpu:
             log("NVIDIA GPU detected - enabling GPU passthrough for Ollama.")
-        if docker.container_exists(self.ollama_name) and not docker.container_has_environment(self.ollama_name, ("OLLAMA_KEEP_ALIVE=0",)):
+        if docker.container_exists(self.ollama_name) and not docker.container_has_environment(self.ollama_name, (self.keep_alive,)):
             docker.stop_if_running(self.ollama_name)
             docker.remove_if_present(self.ollama_name)
         if docker.container_running(self.ollama_name):
@@ -489,7 +490,7 @@ class OllamaWorkload(Workload):
         elif docker.container_exists(self.ollama_name):
             docker.run("start", self.ollama_name)
         else:
-            arguments = ["run", "-d", "--name", self.ollama_name, "--restart", "unless-stopped", "--network", self.network, "-p", "11434:11434", "-v", f"{ollama_data}:/root/.ollama", "-e", "OLLAMA_KEEP_ALIVE=0"]
+            arguments = ["run", "-d", "--name", self.ollama_name, "--restart", "unless-stopped", "--network", self.network, "-p", "11434:11434", "-v", f"{ollama_data}:/root/.ollama", "-e", self.keep_alive]
             if gpu:
                 arguments.extend(("--gpus", "all"))
             docker.run(*arguments, self.ollama_image)

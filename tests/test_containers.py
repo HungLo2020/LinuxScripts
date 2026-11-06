@@ -12,7 +12,7 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from containers.workloads import Action, UptimeKumaWorkload, WORKLOADS, StableDiffusionWorkload, parse_action
+from containers.workloads import Action, OllamaWorkload, UptimeKumaWorkload, WORKLOADS, StableDiffusionWorkload, parse_action
 
 
 def load_tool(name: str):
@@ -27,6 +27,22 @@ def load_tool(name: str):
 
 
 class ContainerMigrationTests(unittest.TestCase):
+    def test_ollama_recreates_old_container_with_five_minute_keep_alive(self):
+        workload = OllamaWorkload()
+        with patch("containers.workloads.Docker") as docker_type, patch("containers.workloads.wait_for_http", return_value=True), patch("containers.workloads.nvidia_gpu_available", return_value=False):
+            docker = docker_type.return_value
+            docker.ensure_available.return_value = True
+            docker.network_exists.return_value = True
+            docker.container_exists.side_effect = [True, False, False, False]
+            docker.container_has_environment.return_value = False
+            docker.container_running.return_value = False
+            docker.output.return_value = f"NAME ID\n{workload.model} id\n"
+            workload.execute(Action.RUN)
+        docker.container_has_environment.assert_any_call("ollama", ("OLLAMA_KEEP_ALIVE=5m",))
+        docker.remove_if_present.assert_any_call("ollama")
+        runs = [call.args for call in docker.run.call_args_list]
+        self.assertTrue(any(args[0] == "run" and "OLLAMA_KEEP_ALIVE=5m" in args for args in runs))
+
     def test_legacy_workload_actions_are_preserved(self):
         self.assertIs(parse_action([]), Action.RUN)
         self.assertIs(parse_action(["--on"]), Action.ON)

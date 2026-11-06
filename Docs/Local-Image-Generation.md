@@ -14,7 +14,7 @@ All model files live below `~/.automatic1111/models/` and are bind-mounted into 
 | FLUX CLIP-L | `clip_l.safetensors` | `text_encoder/` | [ComfyUI maintainer’s encoder repository](https://huggingface.co/comfyanonymous/flux_text_encoders) |
 | FLUX T5-XXL | `t5xxl_fp16.safetensors` | `text_encoder/` | [ComfyUI maintainer’s encoder repository](https://huggingface.co/comfyanonymous/flux_text_encoders) |
 
-The FLUX Q5_1 file is about 9.0 GB; full-FP16 T5-XXL is about 9.8 GB. Forge loads the VAE and text encoders with FLUX and keeps CPU as its swap location. With 8 GB VRAM, Forge is configured with 2 GB inference memory and offloads model weights through system RAM. This favors output fidelity and stability over speed. The exact observed GPU in this host is an RTX 5060 with 8 GiB VRAM (the deployment target was described as RTX 5070); settings are chosen for the shared 8 GB capacity. Ollama unloads its model after a request so it does not hold VRAM while image generation runs.
+The FLUX Q5_1 file is about 9.0 GB; full-FP16 T5-XXL is about 9.8 GB. Forge loads the VAE and text encoders with FLUX and keeps CPU as its swap location. With 8 GB VRAM, Forge is configured with 2 GB inference memory and offloads model weights through system RAM. This favors output fidelity and stability over speed. The exact observed GPU in this host is an RTX 5060 with 8 GiB VRAM (the deployment target was described as RTX 5070); settings are chosen for the shared 8 GB capacity. Ollama keeps a model loaded for five minutes after a request, so follow-up chats can avoid reloading. During that time it can compete with Forge for GPU memory; wait for it to unload or run `docker exec ollama ollama stop MODEL_NAME` before generating images.
 
 ## Recommended starting settings
 
